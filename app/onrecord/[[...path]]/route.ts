@@ -1,10 +1,16 @@
 import { betterAuthStudio } from "better-auth-studio/nextjs";
-import { studioConfig } from "@/lib/products/onrecord";
+import { guardStudioRequest } from "@/lib/role-guard";
+import { BASE_PATH, ROLE_RULES, studioConfig } from "@/lib/products/onrecord";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const handler = betterAuthStudio(studioConfig);
+const studio = betterAuthStudio(studioConfig);
+
+async function handler(request: Request): Promise<Response> {
+	const guarded = await guardStudioRequest(request, BASE_PATH, ROLE_RULES);
+	return guarded instanceof Response ? guarded : studio(guarded);
+}
 
 export {
 	handler as GET,

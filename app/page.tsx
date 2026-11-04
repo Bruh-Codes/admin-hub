@@ -25,6 +25,9 @@ export default function Home() {
 						<a href={p.href} style={{ color: "inherit" }}>
 							{p.name} (email + password) →
 						</a>
+						<a href={`/team/${p.slug}`} style={{ color: "#a3a3a3" }}>
+							People and roles
+						</a>
 						{googleConfigured(p.googleEnvPrefix) ? (
 							<GoogleButton authPath={p.authPath} slug={p.slug} />
 						) : null}

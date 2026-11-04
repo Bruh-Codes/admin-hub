@@ -3,6 +3,7 @@ import { admin, organization, phoneNumber } from "better-auth/plugins";
 import type { StudioConfig } from "better-auth-studio";
 import { Pool } from "pg";
 import { requireEnv, requireList } from "../env";
+import type { RoleRules } from "../role-guard";
 import { BLOCKED_TOOLS, SESSION_SECONDS } from "../studio-defaults";
 
 /**
@@ -18,6 +19,12 @@ import { BLOCKED_TOOLS, SESSION_SECONDS } from "../studio-defaults";
 export const BASE_PATH = "/onrecord";
 /** Where this product's Better Auth routes live on the hub (Google sign-in only). */
 export const AUTH_PATH = "/api/auth/onrecord";
+
+/** OnRecord's roles (apps/api Role enum). "owner" is the everyday user. */
+export const ROLE_RULES: RoleRules = {
+	roles: ["owner", "reviewer", "admin"],
+	defaultRole: "owner",
+};
 
 const googleClientId = process.env.ONRECORD_GOOGLE_CLIENT_ID?.trim();
 const googleClientSecret = process.env.ONRECORD_GOOGLE_CLIENT_SECRET?.trim();
@@ -102,14 +109,21 @@ export const auth = betterAuth({
 	],
 });
 
+function adminEmails(): string[] | undefined {
+	const list = requireList("ONRECORD_ADMIN_EMAILS");
+	return list.includes("*") ? undefined : list;
+}
+
 export const studioConfig: StudioConfig = {
 	auth,
 	basePath: BASE_PATH,
 	metadata: { title: "OnRecord admin", theme: "dark" },
 	access: {
-		// Must be an OnRecord user with role "admin" AND on this list.
+		// Must be an OnRecord user with role "admin" (and on the list, unless "*").
 		roles: ["admin"],
-		allowEmails: requireList("ONRECORD_ADMIN_EMAILS"),
+		// "*" lets in every OnRecord admin, so admins granted from the dashboard
+		// can sign in without a redeploy. Otherwise only the listed emails.
+		allowEmails: adminEmails(),
 		// Own secret per product, never the studio's built-in default.
 		secret,
 		sessionDuration: SESSION_SECONDS,

@@ -14,7 +14,9 @@ Three locks, all required:
 2. **Product admin sign-in**: a real user in that product whose `role` is
    `admin`, signed in with email + password (on `/onrecord`) or with Google
    (button on the hub home page, when Google credentials are set).
-3. **Email allowlist** per product (`ONRECORD_ADMIN_EMAILS`).
+3. **Email allowlist** per product (`ONRECORD_ADMIN_EMAILS`). Set it to `*`
+   to let in every admin of that product, so that admins added from the hub
+   can sign in without a redeploy.
 
 Studio sessions expire after 12 hours without use and are not revoked when someone loses the
 admin role. To remove someone right away, take them off the allowlist, demote
@@ -22,6 +24,19 @@ them, **and** rotate that product's `*_STUDIO_SECRET` (signs everyone out).
 
 Tools that change the schema or mint credentials (`run-migration`, OAuth and
 token/secret generators) are hidden for every product.
+
+## People and roles
+
+`/team/<product>` adds people by email with one of the product's roles, or
+changes an existing user's role. New people get a user with no password; they
+sign in to the product with Google (account linking) or set a password with
+"Forgot password".
+
+The studio's own screens only know Better Auth's generic roles, so the hub
+checks every user create/update before it reaches the database
+(`lib/role-guard.ts`): "user" or no role becomes the product's default role
+(`owner` for OnRecord), anything outside the product's roles is refused, and
+the studio's fake-data "seed" endpoints are blocked.
 
 ## Google sign-in
 

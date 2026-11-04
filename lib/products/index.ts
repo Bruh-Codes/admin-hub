@@ -6,6 +6,8 @@ export const PRODUCTS = [
 		href: "/onrecord",
 		authPath: "/api/auth/onrecord",
 		googleEnvPrefix: "ONRECORD",
+		// First entry is the default (everyday) role. Keep in sync with ROLE_RULES.
+		roles: ["owner", "reviewer", "admin"],
 	},
 ] as const;
 
