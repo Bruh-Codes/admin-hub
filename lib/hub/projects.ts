@@ -1,6 +1,6 @@
 import { decrypt, encrypt } from "./crypto";
 import { hubPool } from "./db";
-import type { ProductConnection } from "./connection";
+import type { ProjectConnection } from "./connection";
 
 export type ProjectRole = "owner" | "admin" | "member";
 export type Project = { id: string; name: string; slug: string; logo: string | null };
@@ -39,7 +39,7 @@ export function canManage(role: ProjectRole): boolean {
 	return role === "owner" || role === "admin";
 }
 
-export type StoredConnection = { connection: ProductConnection; updatedAt: Date };
+export type StoredConnection = { connection: ProjectConnection; updatedAt: Date };
 
 export async function getConnection(projectId: string): Promise<StoredConnection | null> {
 	const { rows } = await hubPool.query(
@@ -50,7 +50,7 @@ export async function getConnection(projectId: string): Promise<StoredConnection
 	return { connection: JSON.parse(decrypt(rows[0].config)), updatedAt: rows[0].updated_at };
 }
 
-export async function saveConnection(projectId: string, connection: ProductConnection): Promise<void> {
+export async function saveConnection(projectId: string, connection: ProjectConnection): Promise<void> {
 	await hubPool.query(
 		`insert into hub_project_connection (project_id, config, updated_at) values ($1, $2, now())
 		 on conflict (project_id) do update set config = excluded.config, updated_at = now()`,

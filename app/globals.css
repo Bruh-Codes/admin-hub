@@ -61,3 +61,8 @@ p { margin: 0; }
 @media (max-width: 720px) { .topbar { padding: 0 12px; gap: 8px; overflow-x: auto; } .tab { padding: 0 10px; } .hide-sm { display: none; } }
 .project-card { transition: border-color .15s; }
 .project-card:hover { border-color: #525252; }
+.setup { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; background: var(--bg); }
+.setup summary { cursor: pointer; font-weight: 500; }
+.setup ol { margin: 14px 0 0; padding-left: 20px; color: var(--muted); }
+.setup li { margin-bottom: 12px; }
+.setup pre { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; color: var(--text); font-size: 14px; overflow-x: auto; margin: 8px 0 0; }

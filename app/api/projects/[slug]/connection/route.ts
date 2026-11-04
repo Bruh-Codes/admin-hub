@@ -1,42 +1,62 @@
 import { Client } from "pg";
 import { hubAuth } from "@/lib/hub/auth";
-import { parseConnection, redactConnection } from "@/lib/hub/connection";
+import { isApp, parseAppConnection, parseConnection, redactProjectConnection } from "@/lib/hub/connection";
 import { canManage, getConnection, getMembership, saveConnection } from "@/lib/hub/projects";
+import { fetchSchema } from "@/lib/hub/remote-app";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ slug: string }> };
 
-async function manager(request: Request, slug: string) {
+async function access(request: Request, slug: string) {
 	const session = await hubAuth.api.getSession({ headers: request.headers });
 	const project = session ? await getMembership(session.user.id, slug) : null;
-	if (!project) return null;
-	return { project, canManage: canManage(project.role) };
+	return project ? { project, canManage: canManage(project.role) } : null;
 }
 
-/** Connection settings without the password-bearing URL. */
+/** Connection settings without the key or database password. */
 export async function GET(request: Request, { params }: Ctx) {
-	const access = await manager(request, (await params).slug);
-	if (!access) return Response.json({ error: "Not found" }, { status: 404 });
-	const stored = await getConnection(access.project.id);
-	return Response.json({ connection: stored ? redactConnection(stored.connection) : null });
+	const a = await access(request, (await params).slug);
+	if (!a) return Response.json({ error: "Not found" }, { status: 404 });
+	const stored = await getConnection(a.project.id);
+	return Response.json({ connection: stored ? redactProjectConnection(stored.connection) : null });
 }
 
 /**
- * Save connection settings (owners and admins). An empty databaseUrl keeps
- * the stored one. The connection is tested before it is saved: the user
- * table must exist and be readable.
+ * Save the connection (owners and admins). It is tested before saving:
+ * an app must answer the admin-hub schema call with this key; a database
+ * must have a readable user table. An empty key / URL keeps the stored one.
  */
 export async function PUT(request: Request, { params }: Ctx) {
-	const access = await manager(request, (await params).slug);
-	if (!access) return Response.json({ error: "Not found" }, { status: 404 });
-	if (!access.canManage) return Response.json({ error: "Only owners and admins can change settings." }, { status: 403 });
+	const a = await access(request, (await params).slug);
+	if (!a) return Response.json({ error: "Not found" }, { status: 404 });
+	if (!a.canManage) return Response.json({ error: "Only owners and admins can change settings." }, { status: 403 });
 
 	const body = await request.json().catch(() => ({}));
+	const stored = await getConnection(a.project.id);
+
+	if (body.kind === "app") {
+		if (!String(body.key ?? "").trim() && stored && isApp(stored.connection)) body.key = stored.connection.key;
+		let connection;
+		try {
+			connection = parseAppConnection(body);
+			const schema = await fetchSchema(connection);
+			const { result: users } = await fetch(`${connection.url}${connection.basePath}/admin-hub/rpc`, {
+				method: "POST",
+				headers: { "content-type": "application/json", "x-admin-hub-key": connection.key },
+				body: JSON.stringify({ op: "count", args: { model: "user" } }),
+				signal: AbortSignal.timeout(15_000),
+			}).then((r) => r.json());
+			await saveConnection(a.project.id, connection);
+			return Response.json({ ok: true, users, plugins: schema.plugins, appName: schema.appName });
+		} catch (e) {
+			return Response.json({ error: (e as Error).message }, { status: 400 });
+		}
+	}
+
 	if (!String(body.databaseUrl ?? "").trim()) {
-		const stored = await getConnection(access.project.id);
-		if (!stored) return Response.json({ error: "Enter the database URL." }, { status: 400 });
+		if (!stored || isApp(stored.connection)) return Response.json({ error: "Enter the database URL." }, { status: 400 });
 		body.databaseUrl = stored.connection.databaseUrl;
 	}
 	let connection;
@@ -45,12 +65,11 @@ export async function PUT(request: Request, { params }: Ctx) {
 	} catch (e) {
 		return Response.json({ error: (e as Error).message }, { status: 400 });
 	}
-
 	const client = new Client({ connectionString: connection.databaseUrl, connectionTimeoutMillis: 8_000 });
 	try {
 		await client.connect();
 		const { rows } = await client.query(`select count(*)::int as n from "${connection.models.user}"`);
-		await saveConnection(access.project.id, connection);
+		await saveConnection(a.project.id, { ...connection, kind: "database" });
 		return Response.json({ ok: true, users: rows[0].n });
 	} catch (e) {
 		return Response.json({ error: `Could not read the "${connection.models.user}" table: ${(e as Error).message}` }, { status: 400 });

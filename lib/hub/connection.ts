@@ -3,6 +3,7 @@
  * project and edited on the project's Settings page.
  */
 export type ProductConnection = {
+	kind?: "database";
 	databaseUrl: string;
 	/** Table (model) names. Better Auth defaults are user, session, ... */
 	models: {
@@ -100,4 +101,36 @@ export function redactConnection(c: ProductConnection) {
 		host = `${u.hostname}${u.port ? `:${u.port}` : ""}${u.pathname}`;
 	} catch {}
 	return { ...c, databaseUrl: "", databaseHost: host };
+}
+
+import type { AppConnection } from "./remote-app";
+export type ProjectConnection = ProductConnection | AppConnection;
+
+export function isApp(c: ProjectConnection): c is AppConnection {
+	return (c as AppConnection).kind === "app";
+}
+
+/** Validate an app URL + key from the form. */
+export function parseAppConnection(input: unknown): AppConnection {
+	const v = (input ?? {}) as Record<string, any>;
+	let url: URL;
+	try {
+		const raw = String(v.url ?? "").trim();
+		url = new URL(/^https?:\/\//.test(raw) ? raw : `https://${raw}`);
+	} catch {
+		throw new Error("Enter the app's URL, e.g. https://app.example.com");
+	}
+	// Plain http only for local testing (HUB_ALLOW_HTTP_APPS=1); keys never travel unencrypted in production.
+	if (url.protocol !== "https:" && process.env.HUB_ALLOW_HTTP_APPS !== "1") throw new Error("The app URL must use https://.");
+	const basePath = "/" + String(v.basePath ?? "/api/auth").trim().replace(/^\/+|\/+$/g, "");
+	if (!/^\/[A-Za-z0-9/_-]*$/.test(basePath)) throw new Error("Auth path is not valid.");
+	const key = String(v.key ?? "").trim();
+	if (key.length < 32) throw new Error("The key must be at least 32 characters (the app's ADMIN_HUB_KEY).");
+	return { kind: "app", url: url.origin, basePath, key };
+}
+
+/** Safe to send to the browser: no key, no password. */
+export function redactProjectConnection(c: ProjectConnection) {
+	if (isApp(c)) return { kind: "app" as const, url: c.url, basePath: c.basePath };
+	return { kind: "database" as const, ...redactConnection(c) };
 }

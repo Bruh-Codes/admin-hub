@@ -3,7 +3,8 @@ import { admin, organization, phoneNumber } from "better-auth/plugins";
 import { betterAuthStudio } from "better-auth-studio/nextjs";
 import { Pool } from "pg";
 import { BLOCKED_TOOLS, SESSION_SECONDS } from "../studio-defaults";
-import type { ProductConnection } from "./connection";
+import { isApp, type ProductConnection } from "./connection";
+import { fetchSchema, remoteAdapter, rolesFrom, type AppConnection } from "./remote-app";
 import { projectSecret } from "./crypto";
 import { getConnection, type Project } from "./projects";
 
@@ -14,11 +15,14 @@ import { getConnection, type Project } from "./projects";
  * server-side to read and manage records.
  */
 type Entry = {
-	version: number;
+	version: string;
 	handler: (request: Request) => Promise<Response>;
-	pool: Pool;
-	connection: ProductConnection;
+	pool: Pool | null;
+	/** The product's user roles, default first (for the role guard). */
+	roles: string[];
 };
+/** Apps are re-asked for their schema at most this often. */
+const APP_SCHEMA_TTL_MS = 10 * 60 * 1000;
 const cache = new Map<string, Entry>();
 
 export function studioBasePath(slug: string) {
@@ -75,25 +79,36 @@ function buildAuth(projectId: string, c: ProductConnection, pool: Pool) {
 	});
 }
 
-export async function getProductStudio(project: Project): Promise<Entry | null> {
-	const stored = await getConnection(project.id);
-	if (!stored) return null;
-	const version = stored.updatedAt.getTime();
-	const existing = cache.get(project.id);
-	if (existing && existing.version === version) return existing;
-	if (existing) existing.pool.end().catch(() => {});
-
-	const c = stored.connection;
-	const pool = new Pool({
-		connectionString: c.databaseUrl,
-		max: 1,
-		idleTimeoutMillis: 5_000,
-		connectionTimeoutMillis: 5_000,
-		allowExitOnIdle: true,
+function buildAppAuth(projectId: string, c: AppConnection, schema: Awaited<ReturnType<typeof fetchSchema>>, roles: string[]) {
+	const userTable = schema.models.user;
+	const additionalFields = Object.fromEntries(
+		schema.userFields
+			.filter((f) => userTable?.fields[f])
+			.map((f) => [f, { type: userTable.fields[f].type as "string", required: false, input: false }]),
+	);
+	const plugins: any[] = [];
+	if (schema.plugins.includes("phone-number")) {
+		plugins.push(phoneNumber({ sendOTP: () => { throw new Error("The admin hub does not send OTPs."); } }));
+	}
+	if (schema.plugins.includes("organization")) plugins.push(organization());
+	if (schema.plugins.includes("admin")) {
+		plugins.push(admin({ defaultRole: roles[0], adminRoles: schema.roles.admin.length ? schema.roles.admin : ["admin"] }));
+	}
+	return betterAuth({
+		appName: schema.appName ?? "Product",
+		// Model names stay Better Auth's own: the app's adapter maps them to its tables.
+		database: remoteAdapter(c, schema),
+		secret: projectSecret(projectId),
+		baseURL: process.env.HUB_URL,
+		advanced: { database: { generateId: false, validateSchema: false } },
+		emailAndPassword: { enabled: true, disableSignUp: true },
+		user: { additionalFields },
+		plugins,
 	});
-	pool.on("error", (e) => console.error(`[project ${project.slug}] database connection closed`, e.message));
-	const auth = buildAuth(project.id, c, pool);
-	const handler = betterAuthStudio({
+}
+
+function makeHandler(project: Project, auth: any) {
+	return betterAuthStudio({
 		auth,
 		basePath: studioBasePath(project.slug),
 		metadata: { title: project.name, theme: "dark" },
@@ -106,7 +121,36 @@ export async function getProductStudio(project: Project): Promise<Entry | null> 
 		},
 		tools: { exclude: BLOCKED_TOOLS },
 	});
-	const entry = { version, handler, pool, connection: c };
+}
+
+export async function getProductStudio(project: Project): Promise<Entry | null> {
+	const stored = await getConnection(project.id);
+	if (!stored) return null;
+	const c = stored.connection;
+	const existing = cache.get(project.id);
+	const baseVersion = String(stored.updatedAt.getTime());
+
+	if (isApp(c)) {
+		const fresh = existing && existing.version.startsWith(`${baseVersion}:`) && Date.now() - Number(existing.version.split(":")[1]) < APP_SCHEMA_TTL_MS;
+		if (fresh) return existing!;
+		const schema = await fetchSchema(c);
+		const roles = rolesFrom(schema);
+		const entry: Entry = { version: `${baseVersion}:${Date.now()}`, handler: makeHandler(project, buildAppAuth(project.id, c, schema, roles)), pool: null, roles };
+		cache.set(project.id, entry);
+		return entry;
+	}
+
+	if (existing && existing.version === baseVersion) return existing;
+	existing?.pool?.end().catch(() => {});
+	const pool = new Pool({
+		connectionString: c.databaseUrl,
+		max: 1,
+		idleTimeoutMillis: 5_000,
+		connectionTimeoutMillis: 5_000,
+		allowExitOnIdle: true,
+	});
+	pool.on("error", (e) => console.error(`[project ${project.slug}] database connection closed`, e.message));
+	const entry: Entry = { version: baseVersion, handler: makeHandler(project, buildAuth(project.id, c, pool)), pool, roles: c.roles };
 	cache.set(project.id, entry);
 	return entry;
 }

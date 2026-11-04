@@ -50,7 +50,15 @@ async function handle(request: Request, { params }: Ctx): Promise<Response> {
 		);
 	}
 
-	const studio = await getProductStudio(project);
+	let studio;
+	try {
+		studio = await getProductStudio(project);
+	} catch (e) {
+		const message = `Could not reach ${project.name}: ${(e as Error).message}`;
+		return isPage
+			? new Response(`<!doctype html><body style="background:#0a0a0a;color:#fafafa;font:16px system-ui;padding:48px">${message.replace(/</g, "&lt;")}</body>`, { status: 502, headers: { "content-type": "text/html" } })
+			: Response.json({ error: message }, { status: 502 });
+	}
 	if (!studio) {
 		return isPage
 			? Response.redirect(new URL(`/p/${slug}/settings`, url), 302)
@@ -58,8 +66,8 @@ async function handle(request: Request, { params }: Ctx): Promise<Response> {
 	}
 
 	const guarded = await guardStudioRequest(request, basePath, {
-		roles: studio.connection.roles,
-		defaultRole: studio.connection.roles[0],
+		roles: studio.roles,
+		defaultRole: studio.roles[0],
 	});
 	if (guarded instanceof Response) return guarded;
 

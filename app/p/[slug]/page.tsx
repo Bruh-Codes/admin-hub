@@ -11,9 +11,9 @@ export default async function Dashboard({ params }: { params: Promise<{ slug: st
 	if (!connected) {
 		return (
 			<main className="page" style={{ maxWidth: 560 }}>
-				<h1>Connect a database</h1>
+				<h1>Connect your app</h1>
 				<p className="muted" style={{ marginTop: 8, marginBottom: 24 }}>
-					{project.name} isn't connected to a product database yet.
+					{project.name} isn't connected yet.
 					{canManage(project.role) ? "" : " Ask a project owner or admin to connect it."}
 				</p>
 				{canManage(project.role) ? <a className="btn btn-primary" href={`/p/${slug}/settings`}>Open settings</a> : null}

@@ -1,4 +1,4 @@
-import { DEFAULT_CONNECTION, ONRECORD_PRESET, redactConnection } from "@/lib/hub/connection";
+import { DEFAULT_CONNECTION, ONRECORD_PRESET, redactProjectConnection } from "@/lib/hub/connection";
 import { canManage, getConnection } from "@/lib/hub/projects";
 import { requireProject } from "@/lib/hub/session";
 import { SettingsClient } from "./settings-client";
@@ -14,7 +14,7 @@ export default async function Settings({ params, searchParams }: { params: Promi
 		<main className="page" style={{ maxWidth: 760 }}>
 			<h1>Settings</h1>
 			<p className="muted" style={{ marginTop: 6 }}>
-				{isNew ? `${project.name} is created. Connect its database to see its users.` : `How the hub connects to ${project.name}'s Better Auth database.`}
+				{isNew ? `${project.name} is created. Connect the app to see its users.` : `How the hub connects to ${project.name}.`}
 			</p>
 			<SettingsClient
 				slug={slug}
@@ -22,7 +22,7 @@ export default async function Settings({ params, searchParams }: { params: Promi
 				projectName={project.name}
 				role={project.role}
 				canManage={canManage(project.role)}
-				initial={stored ? redactConnection(stored.connection) : null}
+				initial={stored ? redactProjectConnection(stored.connection) : null}
 				defaults={DEFAULT_CONNECTION}
 				presets={{ onrecord: ONRECORD_PRESET }}
 			/>

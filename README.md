@@ -1,80 +1,53 @@
 # Admin hub
 
-One private dashboard for the Better Auth users of every product, built on
-[better-auth-studio](https://github.com/Kinfe123/better-auth-studio) (MIT, npm
-package, used unmodified). Each product lives at its own path, e.g.
-`/onrecord`, with its own database and its own admin sign-in.
+A private, multi-project dashboard for the Better Auth users of all your
+products, built on [better-auth-studio](https://github.com/Kinfe123/better-auth-studio)
+(MIT, used unmodified from npm).
 
-## Who can get in
+- **Sign in** with Google. Accounts are invite-only: only emails in
+  `HUB_OWNER_EMAILS` or with a pending project invitation can sign up.
+- **Projects**: one per product. Owners in `HUB_OWNER_EMAILS` create them.
+- **Team** per project: invite by email as `member` (read-only), `admin`
+  (edit users, invite, settings) or `owner` (also delete the project).
+  Invitees sign in with Google and accept on the Projects page.
+- **Dashboard** per project: the studio, opened only for project members.
 
-Three locks, all required:
+## Connecting a product
 
-1. **Hub password** (HTTP Basic Auth, `HUB_BASIC_USER` / `HUB_BASIC_PASSWORD`)
-   in front of everything. With no password set, the hub refuses all requests.
-2. **Product admin sign-in**: a real user in that product whose `role` is
-   `admin`, signed in with email + password (on `/onrecord`) or with Google
-   (button on the hub home page, when Google credentials are set).
-3. **Email allowlist** per product (`ONRECORD_ADMIN_EMAILS`). Set it to `*`
-   to let in every admin of that product, so that admins added from the hub
-   can sign in without a redeploy.
+**Better Auth apps (recommended).** Copy [`plugin/admin-hub.ts`](plugin/admin-hub.ts)
+into the app and add it to its Better Auth plugins:
 
-Studio sessions expire after 12 hours without use and are not revoked when someone loses the
-admin role. To remove someone right away, take them off the allowlist, demote
-them, **and** rotate that product's `*_STUDIO_SECRET` (signs everyone out).
+```ts
+import { adminHub } from "./admin-hub";
 
-Tools that change the schema or mint credentials (`run-migration`, OAuth and
-token/secret generators) are hidden for every product.
+plugins: [
+  // ...your plugins
+  adminHub({ key: process.env.ADMIN_HUB_KEY, roles: ["owner", "reviewer", "admin"] }),
+]
+```
 
-## People and roles
+Set `ADMIN_HUB_KEY` (`openssl rand -base64 32`) in the app's env and deploy.
+In the hub: project → Settings → paste the app URL and the same key. The hub
+reads the app's tables, fields and plugins from the plugin, and every read or
+write goes through the app's own Better Auth adapter. `roles` is optional; it
+lists the user roles the hub may assign (default first).
 
-`/team/<product>` adds people by email with one of the product's roles, or
-changes an existing user's role. New people get a user with no password; they
-sign in to the product with Google (account linking) or set a password with
-"Forgot password".
+**Advanced: a database URL.** For apps whose auth tables follow Better Auth's
+shape under other names. Saved encrypted with `HUB_ENCRYPTION_KEY`.
 
-The studio's own screens only know Better Auth's generic roles, so the hub
-checks every user create/update before it reaches the database
-(`lib/role-guard.ts`): "user" or no role becomes the product's default role
-(`owner` for OnRecord), anything outside the product's roles is refused, and
-the studio's fake-data "seed" endpoints are blocked.
+## Safety rails
 
-## Google sign-in
-
-The hub runs its own Better Auth instance per product but exposes only two of
-its endpoints: `POST /api/auth/<product>/sign-in/social` (Google only) and
-`GET /api/auth/<product>/callback/google`. Google can never create a user: a
-Google email with no matching user is refused. After Google, `/google-done`
-asks the studio to check the admin role and allowlist, the same checks as for
-a password sign-in.
-
-Setup for OnRecord: in Google Cloud Console create an OAuth client of type
-"Web application", add the authorized redirect URI
-`<HUB_URL>/api/auth/onrecord/callback/google`, and set
-`ONRECORD_GOOGLE_CLIENT_ID` and `ONRECORD_GOOGLE_CLIENT_SECRET` in Vercel.
+- Studio requests require a hub session and project membership; members are read-only.
+- Product user roles are checked against the product's roles (`lib/role-guard.ts`);
+  the studio's fake-data "seed" endpoints are blocked.
+- Tools that change schemas or mint credentials are hidden.
+- Keys and database URLs are stored encrypted and never sent to the browser.
+- App URLs must be https (`HUB_ALLOW_HTTP_APPS=1` only for local testing).
 
 ## Deploy on Vercel
 
-1. Import this repo in Vercel (framework: Next.js, no build settings to change).
-2. Add the env vars from `.env.example` (Production only).
-3. Deploy, then set `HUB_URL` to the deployment URL and redeploy.
-
-## Add another product
-
-1. Copy `lib/products/onrecord.ts` to `lib/products/<name>.ts` and mirror that
-   product's Better Auth config (table names, id generator, extra fields,
-   plugins). Use a new `BASE_PATH` and new env var names.
-2. Copy `app/onrecord/[[...path]]/route.ts` to `app/<name>/[[...path]]/route.ts`
-   and import the new config. For Google, also copy
-   `app/api/auth/onrecord/[...all]/route.ts`.
-3. Add a line to `lib/products/index.ts` and the env vars in Vercel.
-
-All products share one session cookie name, so opening a second product signs
-you out of the first. Each product has its own secret, so a session from one
-never works on another.
-
-## Keep in step with OnRecord
-
-`lib/products/onrecord.ts` mirrors `apps/web/lib/auth.ts` in Bruh-Codes/Onrecord.
-If that file changes table names, the id generator, or user fields, change
-this one too, or the studio reads the wrong tables or creates users whose ids
-the API cannot parse.
+1. Create an empty Postgres for the hub (e.g. Neon from Vercel's Storage tab).
+2. Set the env vars from `.env.example`.
+3. Google Cloud Console: OAuth client (Web application) with redirect URI
+   `<HUB_URL>/api/auth/callback/google`.
+4. Deploy. The `vercel-build` script creates/updates the hub's tables first.
