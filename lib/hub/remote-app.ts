@@ -39,6 +39,9 @@ async function call<T>(c: AppConnection, path: string, body: unknown): Promise<T
 		if (res.status === 401) throw new Error("The app rejected the key. Check that it matches the app's ADMIN_HUB_KEY.");
 		throw new Error(data?.message || `The app answered ${res.status}.`);
 	}
+	if (data === null) {
+		throw new Error(`The app answered ${res.status} without JSON (${res.headers.get("content-type") ?? "no content-type"}): ${JSON.stringify(text.slice(0, 200))}`);
+	}
 	return data as T;
 }
 
@@ -65,7 +68,13 @@ function reviver(schema: RemoteSchema, model: string) {
 /** A Better Auth database adapter backed by the product's admin-hub endpoint. */
 export function remoteAdapter(c: AppConnection, schema: RemoteSchema) {
 	const rpc = async (op: string, args: Record<string, any>) => {
-		const { result } = await call<{ result: any }>(c, "rpc", { op, args });
+		let result: any;
+		try {
+			({ result } = await call<{ result: any }>(c, "rpc", { op, args }));
+		} catch (e) {
+			console.error(`[hub] ${op} ${args.model} failed:`, (e as Error).message);
+			throw e;
+		}
 		return typeof result === "number" ? result : reviver(schema, String(args.model))(result);
 	};
 	return (): DBAdapter => {
