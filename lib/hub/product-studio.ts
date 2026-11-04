@@ -2,6 +2,7 @@ import { betterAuth } from "better-auth";
 import { admin, organization, phoneNumber } from "better-auth/plugins";
 import { betterAuthStudio } from "better-auth-studio/nextjs";
 import { Pool } from "pg";
+import { sslFor } from "./pg-ssl";
 import { BLOCKED_TOOLS, SESSION_SECONDS } from "../studio-defaults";
 import { isApp, type ProductConnection } from "./connection";
 import { fetchSchema, remoteAdapter, rolesFrom, type AppConnection } from "./remote-app";
@@ -144,6 +145,7 @@ export async function getProductStudio(project: Project): Promise<Entry | null> 
 	existing?.pool?.end().catch(() => {});
 	const pool = new Pool({
 		connectionString: c.databaseUrl,
+		...sslFor(c.databaseUrl),
 		max: 1,
 		idleTimeoutMillis: 5_000,
 		connectionTimeoutMillis: 5_000,
