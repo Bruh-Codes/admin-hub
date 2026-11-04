@@ -20,11 +20,23 @@ async function hasPendingInvite(email: string): Promise<boolean> {
 	return rows.length > 0;
 }
 
+// Tolerate "admin-hub.vercel.app" or a trailing slash in HUB_URL.
+const hubUrl = (() => {
+	const raw = requireEnv("HUB_URL").trim().replace(/\/+$/, "");
+	return /^https?:\/\//.test(raw) ? raw : `https://${raw}`;
+})();
+// Also accept Vercel's own production domain, so a HUB_URL that names a
+// different alias doesn't reject sign-in with "Invalid origin".
+const vercelOrigins = [process.env.VERCEL_PROJECT_PRODUCTION_URL, process.env.VERCEL_BRANCH_URL]
+	.filter((h): h is string => !!h)
+	.map((h) => `https://${h}`);
+
 export const hubAuth = betterAuth({
 	appName: "Admin hub",
 	database: hubPool,
 	secret: requireEnv("HUB_SECRET"),
-	baseURL: requireEnv("HUB_URL"),
+	baseURL: hubUrl,
+	trustedOrigins: [hubUrl, ...vercelOrigins],
 	socialProviders: {
 		google: {
 			clientId: requireEnv("HUB_GOOGLE_CLIENT_ID"),
