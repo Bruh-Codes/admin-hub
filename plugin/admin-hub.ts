@@ -99,7 +99,7 @@ export function adminHub(options: {
 			}),
 			adminHubRpc: createAuthEndpoint("/admin-hub/rpc", { method: "POST", requireHeaders: true }, async (ctx) => {
 				guard(ctx.headers);
-				const body = (ctx.body ?? {}) as { op?: Op; args?: Record<string, any> };
+				const body = (ctx.body ?? {}) as { op?: Op; args?: Record<string, unknown> };
 				const op = body.op;
 				const args = { ...(body.args ?? {}) };
 				if (!op || !OPS.includes(op)) throw new APIError("BAD_REQUEST", { message: "Unknown operation" });
@@ -110,9 +110,9 @@ export function adminHub(options: {
 				if (args.data) args.data = reviveDates(args.data, isDate);
 				if (args.update) args.update = reviveDates(args.update, isDate);
 				if (Array.isArray(args.where)) {
-					args.where = args.where.map((w: any) => ({ ...w, value: typeof w.value === "string" && isDate(w.field) && !Number.isNaN(Date.parse(w.value)) ? new Date(w.value) : w.value }));
+					args.where = (args.where as { field: string; value: unknown }[]).map((w) => ({ ...w, value: typeof w.value === "string" && isDate(w.field) && !Number.isNaN(Date.parse(w.value)) ? new Date(w.value) : w.value }));
 				}
-				const adapter = ctx.context.adapter as any;
+				const adapter = ctx.context.adapter as unknown as Record<Op, (a: unknown) => Promise<unknown>>;
 				const result = await adapter[op](args);
 				return ctx.json({ result: result ?? null });
 			}),
