@@ -4,6 +4,7 @@ import { UserMenu } from "@/components/user-menu";
 import { hubOwners } from "@/lib/hub/auth";
 import { pendingInvitesFor } from "@/lib/hub/invites";
 import { listMemberships } from "@/lib/hub/projects";
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/hub/session";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +13,8 @@ export default async function Projects() {
 	const { user } = await requireUser();
 	const [projects, invites] = await Promise.all([listMemberships(user.id), pendingInvitesFor(user.email)]);
 	const canCreate = hubOwners().includes(user.email.toLowerCase());
+	// A new owner starts on onboarding instead of an empty list.
+	if (canCreate && projects.length === 0 && invites.length === 0) redirect("/projects/new");
 
 	return (
 		<>

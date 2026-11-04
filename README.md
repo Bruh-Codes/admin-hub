@@ -51,3 +51,9 @@ shape under other names. Saved encrypted with `HUB_ENCRYPTION_KEY`.
 3. Google Cloud Console: OAuth client (Web application) with redirect URI
    `<HUB_URL>/api/auth/callback/google`.
 4. Deploy. The `vercel-build` script creates/updates the hub's tables first.
+
+## Roadmap
+
+- Publish the admin-hub plugin as an npm package, so apps install it with `npm i` instead of downloading `plugin/admin-hub.ts`.
+- Custom projects: connect apps that don't use Better Auth by mapping their own user tables (shown as "Coming soon" on the New project page).
+- Events feed and a project-wide activity log.

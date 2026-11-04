@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
 	// every product route.
 	serverExternalPackages: ["better-auth-studio"],
 	outputFileTracingIncludes: {
-		"/**": ["./node_modules/better-auth-studio/dist/public/**/*"],
+		"/**": ["./node_modules/better-auth-studio/dist/public/**/*", "./plugin/**/*"],
 	},
 	async headers() {
 		return [
