@@ -36,7 +36,18 @@ export const hubAuth = betterAuth({
 	database: hubPool,
 	secret: requireEnv("HUB_SECRET"),
 	baseURL: hubUrl,
-	trustedOrigins: [hubUrl, ...vercelOrigins],
+	// Same-origin requests are always fine: trust the host actually serving
+	// this request (on Vercel that's the domain in the address bar).
+	trustedOrigins: async (request) => {
+		const own: string[] = [];
+		if (request) {
+			try {
+				const host = request.headers.get("x-forwarded-host") ?? new URL(request.url).host;
+				own.push(`https://${host}`);
+			} catch {}
+		}
+		return [hubUrl, ...vercelOrigins, ...own];
+	},
 	socialProviders: {
 		google: {
 			clientId: requireEnv("HUB_GOOGLE_CLIENT_ID"),
