@@ -14,6 +14,6 @@ export function requireEnv(name: string): string {
 export function envList(name: string): string[] {
 	return (process.env[name] ?? "")
 		.split(",")
-		.map((item) => item.trim().toLowerCase())
+		.map((item) => item.trim().replace(/^["']|["']$/g, "").trim().toLowerCase())
 		.filter(Boolean);
 }
