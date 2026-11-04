@@ -11,8 +11,8 @@ export const STUDIO_THEME = `
 html { font-size: 16px; }
 body, button, input, select, textarea { font-family: "Geist", ui-sans-serif, system-ui, sans-serif !important; }
 .font-mono, code, pre, kbd { font-family: "Geist Mono", ui-monospace, monospace !important; }
-.text-\\[0\\.35rem\\], .text-\\[0\\.4rem\\], .text-\\[0\\.55rem\\], .text-\\[7px\\], .text-\\[8px\\], .text-\\[9px\\] { font-size: 12px !important; }
-.text-\\[10px\\], .text-\\[11px\\] { font-size: 13px !important; line-height: 1.4 !important; }
-.text-xs { font-size: 0.8125rem !important; line-height: 1.25rem !important; }
-.text-sm { font-size: 0.9375rem !important; line-height: 1.4rem !important; }
+.text-\\[0\\.35rem\\], .text-\\[0\\.4rem\\], .text-\\[0\\.55rem\\], .text-\\[7px\\], .text-\\[8px\\], .text-\\[9px\\] { font-size: 13px !important; line-height: 1.4 !important; }
+.text-\\[10px\\], .text-\\[11px\\] { font-size: 14px !important; line-height: 1.4 !important; }
+.text-xs { font-size: 0.875rem !important; line-height: 1.3rem !important; }
+.text-sm { font-size: 1rem !important; line-height: 1.5rem !important; }
 </style>`;

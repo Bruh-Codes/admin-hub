@@ -90,6 +90,8 @@ async function handle(request: Request, { params }: Ctx): Promise<Response> {
 	if ((out.get("content-type") ?? "").includes("text/html")) {
 		const html = (await response.text()).replace("</head>", `${STUDIO_THEME}</head>`);
 		out.delete("content-length");
+		out.delete("content-encoding");
+		out.set("cache-control", "no-store");
 		return new Response(html, { status: response.status, headers: out });
 	}
 	return new Response(response.body, { status: response.status, headers: out });
