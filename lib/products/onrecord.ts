@@ -1,0 +1,89 @@
+import { betterAuth } from "better-auth";
+import { admin, organization, phoneNumber } from "better-auth/plugins";
+import type { StudioConfig } from "better-auth-studio";
+import { Pool } from "pg";
+import { requireEnv, requireList } from "../env";
+import { BLOCKED_TOOLS, SESSION_SECONDS } from "../studio-defaults";
+
+/**
+ * OnRecord's Better Auth schema, mirrored from apps/web/lib/auth.ts in
+ * Bruh-Codes/Onrecord. Keep the model names, id generator and extra fields in
+ * step with that file: if they drift, the studio reads or writes the wrong
+ * tables or creates users whose ids apps/api cannot parse.
+ *
+ * Deliberately left out: emails, SMS, Google sign-in, the jwt plugin and
+ * nextCookies. The hub only reads and manages records; it never signs users
+ * into OnRecord itself.
+ */
+export const BASE_PATH = "/onrecord";
+
+const pool = new Pool({
+	connectionString: requireEnv("ONRECORD_DATABASE_URL"),
+	// Railway's public TCP proxy retires idle sockets; keep one short-lived
+	// connection per function instance, same as the OnRecord web app.
+	max: 1,
+	idleTimeoutMillis: 5_000,
+	connectionTimeoutMillis: 5_000,
+	allowExitOnIdle: true,
+});
+pool.on("error", (error) => {
+	console.error("[onrecord] database connection closed", error.message);
+});
+
+const secret = requireEnv("ONRECORD_STUDIO_SECRET");
+
+export const auth = betterAuth({
+	appName: "OnRecord",
+	database: pool,
+	secret,
+	baseURL: requireEnv("HUB_URL"),
+	advanced: {
+		database: {
+			// apps/api parses user ids as UUIDs, so ids must be real UUIDs.
+			generateId: () => crypto.randomUUID(),
+			validateSchema: false,
+		},
+	},
+	emailAndPassword: { enabled: true },
+	user: {
+		modelName: "auth_user",
+		deleteUser: { enabled: true },
+		additionalFields: {
+			businessId: { type: "string", required: false, input: false },
+			institutionId: { type: "string", required: false, input: false },
+		},
+	},
+	session: { modelName: "auth_session" },
+	account: { modelName: "auth_account" },
+	verification: { modelName: "auth_verification" },
+	plugins: [
+		phoneNumber({
+			sendOTP: () => {
+				throw new Error("The admin hub does not send OTPs.");
+			},
+		}),
+		organization({
+			schema: {
+				organization: { modelName: "auth_organization" },
+				member: { modelName: "auth_member" },
+				invitation: { modelName: "auth_invitation" },
+			},
+		}),
+		admin({ defaultRole: "owner", adminRoles: ["admin"] }),
+	],
+});
+
+export const studioConfig: StudioConfig = {
+	auth,
+	basePath: BASE_PATH,
+	metadata: { title: "OnRecord admin", theme: "dark" },
+	access: {
+		// Must be an OnRecord user with role "admin" AND on this list.
+		roles: ["admin"],
+		allowEmails: requireList("ONRECORD_ADMIN_EMAILS"),
+		// Own secret per product, never the studio's built-in default.
+		secret,
+		sessionDuration: SESSION_SECONDS,
+	},
+	tools: { exclude: BLOCKED_TOOLS },
+};
