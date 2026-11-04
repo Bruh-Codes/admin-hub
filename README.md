@@ -11,16 +11,31 @@ Three locks, all required:
 
 1. **Hub password** (HTTP Basic Auth, `HUB_BASIC_USER` / `HUB_BASIC_PASSWORD`)
    in front of everything. With no password set, the hub refuses all requests.
-2. **Product admin sign-in**: email + password of a real user in that product
-   whose `role` is `admin`.
+2. **Product admin sign-in**: a real user in that product whose `role` is
+   `admin`, signed in with email + password (on `/onrecord`) or with Google
+   (button on the hub home page, when Google credentials are set).
 3. **Email allowlist** per product (`ONRECORD_ADMIN_EMAILS`).
 
-Studio sessions last 12 hours and are not revoked when someone loses the
+Studio sessions expire after 12 hours without use and are not revoked when someone loses the
 admin role. To remove someone right away, take them off the allowlist, demote
 them, **and** rotate that product's `*_STUDIO_SECRET` (signs everyone out).
 
 Tools that change the schema or mint credentials (`run-migration`, OAuth and
 token/secret generators) are hidden for every product.
+
+## Google sign-in
+
+The hub runs its own Better Auth instance per product but exposes only two of
+its endpoints: `POST /api/auth/<product>/sign-in/social` (Google only) and
+`GET /api/auth/<product>/callback/google`. Google can never create a user: a
+Google email with no matching user is refused. After Google, `/google-done`
+asks the studio to check the admin role and allowlist, the same checks as for
+a password sign-in.
+
+Setup for OnRecord: in Google Cloud Console create an OAuth client of type
+"Web application", add the authorized redirect URI
+`<HUB_URL>/api/auth/onrecord/callback/google`, and set
+`ONRECORD_GOOGLE_CLIENT_ID` and `ONRECORD_GOOGLE_CLIENT_SECRET` in Vercel.
 
 ## Deploy on Vercel
 
@@ -34,7 +49,8 @@ token/secret generators) are hidden for every product.
    product's Better Auth config (table names, id generator, extra fields,
    plugins). Use a new `BASE_PATH` and new env var names.
 2. Copy `app/onrecord/[[...path]]/route.ts` to `app/<name>/[[...path]]/route.ts`
-   and import the new config.
+   and import the new config. For Google, also copy
+   `app/api/auth/onrecord/[...all]/route.ts`.
 3. Add a line to `lib/products/index.ts` and the env vars in Vercel.
 
 All products share one session cookie name, so opening a second product signs

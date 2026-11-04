@@ -1,4 +1,7 @@
-import { PRODUCTS } from "@/lib/products";
+import { PRODUCTS, googleConfigured } from "@/lib/products";
+import { GoogleButton } from "./google-button";
+
+export const dynamic = "force-dynamic";
 
 export default function Home() {
 	return (
@@ -7,10 +10,24 @@ export default function Home() {
 			<p style={{ color: "#a3a3a3" }}>Pick a product. Each one has its own sign-in.</p>
 			<ul style={{ listStyle: "none", padding: 0 }}>
 				{PRODUCTS.map((p) => (
-					<li key={p.slug} style={{ borderTop: "1px solid #262626" }}>
-						<a href={p.href} style={{ display: "block", padding: "16px 0", color: "inherit" }}>
-							{p.name} →
+					<li
+						key={p.slug}
+						style={{
+							borderTop: "1px solid #262626",
+							padding: "16px 0",
+							display: "flex",
+							gap: 16,
+							alignItems: "center",
+							justifyContent: "space-between",
+							flexWrap: "wrap",
+						}}
+					>
+						<a href={p.href} style={{ color: "inherit" }}>
+							{p.name} (email + password) →
 						</a>
+						{googleConfigured(p.googleEnvPrefix) ? (
+							<GoogleButton authPath={p.authPath} slug={p.slug} />
+						) : null}
 					</li>
 				))}
 			</ul>
