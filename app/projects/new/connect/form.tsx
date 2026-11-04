@@ -83,8 +83,15 @@ export function NewProjectForm({ hubUrl }: { hubUrl: string }) {
 			return setError(error.message ?? "Could not create the project.");
 		}
 		const saved = await fetch(`/api/projects/${slug}/connection`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(connection) });
+		if (!saved.ok) {
+			// Keep the key: the project exists, but the hub couldn't store the
+			// connection. Say why instead of silently dropping to Settings.
+			const body = await saved.json().catch(() => ({}));
+			setBusy(null);
+			return setError(`The project was created, but the hub couldn't save the connection: ${body.error ?? `HTTP ${saved.status}`}. Fix that, then connect it from the project's Settings with the same key.`);
+		}
 		try { sessionStorage.removeItem(KEY_STORE); } catch {}
-		window.location.href = saved.ok ? `/p/${slug}` : `/p/${slug}/settings?new=1`;
+		window.location.href = `/p/${slug}`;
 	}
 
 	return (
