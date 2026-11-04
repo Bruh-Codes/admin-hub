@@ -1,6 +1,6 @@
 /**
  * Read a required server env var. Throws (fails closed) when it is missing,
- * so a half-configured product never comes up with open or default settings.
+ * so a half-configured hub never comes up with open or default settings.
  */
 export function requireEnv(name: string): string {
 	const value = process.env[name]?.trim();
@@ -10,14 +10,10 @@ export function requireEnv(name: string): string {
 	return value;
 }
 
-/** Comma-separated list env var, lower-cased. Throws when empty. */
-export function requireList(name: string): string[] {
-	const list = requireEnv(name)
+/** Comma-separated list env var, lower-cased. Empty list when unset. */
+export function envList(name: string): string[] {
+	return (process.env[name] ?? "")
 		.split(",")
 		.map((item) => item.trim().toLowerCase())
 		.filter(Boolean);
-	if (list.length === 0) {
-		throw new Error(`${name} must list at least one entry.`);
-	}
-	return list;
 }

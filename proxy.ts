@@ -1,17 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
- * Outer gate for the whole hub: HTTP Basic Auth with one shared hub
- * password, checked before any studio code runs. Each product then asks for
- * its own admin sign-in. Fails closed: with no password configured, every
- * request is refused.
+ * Optional outer gate: HTTP Basic Auth with one shared password, checked
+ * before anything else. Off unless HUB_BASIC_USER and HUB_BASIC_PASSWORD are
+ * both set. Normal access control is Google sign-in plus project membership.
  */
 export function proxy(request: NextRequest) {
 	const user = process.env.HUB_BASIC_USER;
 	const password = process.env.HUB_BASIC_PASSWORD;
-	if (!user || !password) {
-		return new NextResponse("Admin hub is not configured.", { status: 503 });
-	}
+	if (!user || !password) return NextResponse.next();
 
 	const header = request.headers.get("authorization") ?? "";
 	if (header.startsWith("Basic ")) {

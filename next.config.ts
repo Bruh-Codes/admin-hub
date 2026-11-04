@@ -14,7 +14,9 @@ const nextConfig: NextConfig = {
 				source: "/:path*",
 				headers: [
 					{ key: "X-Robots-Tag", value: "noindex, nofollow" },
-					{ key: "X-Frame-Options", value: "DENY" },
+					// The studio is shown in a same-origin frame inside the project page.
+					{ key: "X-Frame-Options", value: "SAMEORIGIN" },
+					{ key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
 					{ key: "Referrer-Policy", value: "no-referrer" },
 				],
 			},

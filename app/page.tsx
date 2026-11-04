@@ -1,39 +1,39 @@
-import { PRODUCTS, googleConfigured } from "@/lib/products";
-import { GoogleButton } from "./google-button";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { GoogleButton } from "@/components/google-button";
+import { Logo } from "@/components/logo";
+import { hubAuth } from "@/lib/hub/auth";
 
 export const dynamic = "force-dynamic";
 
-export default function Home() {
+const ERRORS: Record<string, string> = {
+	unable_to_create_user: "This Google account hasn't been invited to a project yet. Ask a project admin to invite your email.",
+	access_denied: "Google sign-in was cancelled.",
+};
+
+export default async function SignIn({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+	const session = await hubAuth.api.getSession({ headers: await headers() });
+	if (session) redirect("/projects");
+	const { error } = await searchParams;
+
 	return (
-		<main style={{ maxWidth: 640, margin: "0 auto", padding: "64px 16px" }}>
-			<h1 style={{ fontSize: 20, fontWeight: 600 }}>Admin hub</h1>
-			<p style={{ color: "#a3a3a3" }}>Pick a product. Each one has its own sign-in.</p>
-			<ul style={{ listStyle: "none", padding: 0 }}>
-				{PRODUCTS.map((p) => (
-					<li
-						key={p.slug}
-						style={{
-							borderTop: "1px solid #262626",
-							padding: "16px 0",
-							display: "flex",
-							gap: 16,
-							alignItems: "center",
-							justifyContent: "space-between",
-							flexWrap: "wrap",
-						}}
-					>
-						<a href={p.href} style={{ color: "inherit" }}>
-							{p.name} (email + password) →
-						</a>
-						<a href={`/team/${p.slug}`} style={{ color: "#a3a3a3" }}>
-							People and roles
-						</a>
-						{googleConfigured(p.googleEnvPrefix) ? (
-							<GoogleButton authPath={p.authPath} slug={p.slug} />
-						) : null}
-					</li>
-				))}
-			</ul>
+		<main style={{ minHeight: "100dvh", display: "grid", placeItems: "center", padding: 16 }}>
+			<div className="card" style={{ width: "100%", maxWidth: 420, padding: 40 }}>
+				<Logo size={36} />
+				<h1 style={{ marginTop: 32, fontSize: 26 }}>Sign in</h1>
+				<p className="muted" style={{ marginTop: 8, marginBottom: 28 }}>
+					Manage users, organizations and sessions across your products.
+				</p>
+				<GoogleButton />
+				{error ? (
+					<p className="error" style={{ marginTop: 16, fontSize: 15 }}>
+						{ERRORS[error] ?? `Sign-in failed (${error}).`}
+					</p>
+				) : null}
+				<p className="faint" style={{ marginTop: 28, fontSize: 14 }}>
+					Access is by invitation. New accounts are only created for invited emails.
+				</p>
+			</div>
 		</main>
 	);
 }

@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "vercel-build": "tsx scripts/migrate.mts && next build",
+    "db:migrate": "tsx scripts/migrate.mts",
     "start": "next start"
   },
   "dependencies": {
@@ -19,6 +21,7 @@
     "@types/node": "^22",
     "@types/pg": "^8",
     "@types/react": "^19",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }
