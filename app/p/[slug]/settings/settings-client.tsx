@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { DEFAULT_CONNECTION, redactProjectConnection } from "@/lib/hub/connection";
+import { PluginSteps } from "@/components/plugin-steps";
 import { hubClient } from "@/lib/hub/client";
 
 type Shape = typeof DEFAULT_CONNECTION;
@@ -110,17 +111,7 @@ export function SettingsClient(props: {
 						<label className="label" htmlFor="app-key">Admin hub key</label>
 						<input id="app-key" className="input mono" type="password" autoComplete="off" disabled={disabled} required={!initialApp} placeholder={initialApp ? "Saved. Leave empty to keep it." : "The app's ADMIN_HUB_KEY"} value={appKey} onChange={(e) => setAppKey(e.target.value)} />
 					</div>
-					<details className="setup">
-						<summary>How to add the plugin to your app</summary>
-						<ol>
-							<li>Copy <span className="mono">plugin/admin-hub.ts</span> from the admin-hub repo into your app, next to your <span className="mono">auth.ts</span>.</li>
-							<li>
-								Add it to your Better Auth plugins:
-								<pre className="mono">{`import { adminHub } from "./admin-hub";\n\nplugins: [\n  // ...your plugins\n  adminHub({ key: process.env.ADMIN_HUB_KEY }),\n]`}</pre>
-							</li>
-							<li>Set <span className="mono">ADMIN_HUB_KEY</span> in the app's env to a random value (<span className="mono">openssl rand -base64 32</span>), deploy, and paste the same value above.</li>
-						</ol>
-					</details>
+					<PluginSteps />
 					{msg ? <p className={msg.ok ? "ok" : "error"}>{msg.text}</p> : null}
 					{props.canManage ? (
 						<div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
