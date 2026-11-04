@@ -74,7 +74,8 @@ export function SettingsClient(props: {
 		if (!res.ok) return setMsg({ ok: false, text: data.error ?? "Could not save." });
 		setDatabaseUrl("");
 		setAppKey("");
-		setMsg({ ok: true, text: `Connected. Found ${data.users} users. Open the Dashboard tab to see them.` });
+		setMsg({ ok: true, text: `Connected. Found ${data.users} users. Opening the dashboard…` });
+		window.location.href = `/p/${props.slug}`;
 	}
 
 	async function deleteProject() {
