@@ -3,7 +3,7 @@ import { parseAppConnection } from "@/lib/hub/connection";
 import { encrypt } from "@/lib/hub/crypto";
 import { hubPool } from "@/lib/hub/db";
 import { saveConnection } from "@/lib/hub/projects";
-import { fetchSchema } from "@/lib/hub/remote-app";
+import { countUsers, fetchSchema } from "@/lib/hub/remote-app";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,13 +29,7 @@ export async function POST(request: Request) {
 	try {
 		connection = parseAppConnection(body.connection ?? {});
 		await fetchSchema(connection);
-		const res = await fetch(`${connection.url}${connection.basePath}/admin-hub/rpc`, {
-			method: "POST",
-			headers: { "content-type": "application/json", "x-admin-hub-key": connection.key },
-			body: JSON.stringify({ op: "count", args: { model: "user" } }),
-			signal: AbortSignal.timeout(15_000),
-		});
-		if (!res.ok) throw new Error(`The app couldn't read its users (HTTP ${res.status}).`);
+		await countUsers(connection);
 	} catch (e) {
 		return fail((e as Error).message);
 	}

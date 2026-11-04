@@ -2,7 +2,7 @@ import { Client } from "pg";
 import { hubAuth } from "@/lib/hub/auth";
 import { isApp, parseAppConnection, parseConnection, redactProjectConnection } from "@/lib/hub/connection";
 import { canManage, getConnection, getMembership, saveConnection } from "@/lib/hub/projects";
-import { fetchSchema } from "@/lib/hub/remote-app";
+import { countUsers, fetchSchema } from "@/lib/hub/remote-app";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,12 +42,7 @@ export async function PUT(request: Request, { params }: Ctx) {
 		try {
 			connection = parseAppConnection(body);
 			const schema = await fetchSchema(connection);
-			const { result: users } = await fetch(`${connection.url}${connection.basePath}/admin-hub/rpc`, {
-				method: "POST",
-				headers: { "content-type": "application/json", "x-admin-hub-key": connection.key },
-				body: JSON.stringify({ op: "count", args: { model: "user" } }),
-				signal: AbortSignal.timeout(15_000),
-			}).then((r) => r.json());
+			const users = await countUsers(connection);
 			await saveConnection(a.project.id, connection);
 			return Response.json({ ok: true, users, plugins: schema.plugins, appName: schema.appName });
 		} catch (e) {

@@ -100,3 +100,10 @@ export function rolesFrom(schema: RemoteSchema): string[] {
 	const list = schema.roles.all?.length ? schema.roles.all : [schema.roles.default ?? "user", ...schema.roles.admin];
 	return [...new Set(list.filter(Boolean))] as string[];
 }
+
+/** Number of users in the app; also proves the rpc endpoint works with this key. */
+export async function countUsers(c: AppConnection): Promise<number> {
+	const data = await call<{ result?: unknown } | null>(c, "rpc", { op: "count", args: { model: "user" } });
+	if (!data || typeof data.result !== "number") throw new Error("The app's admin-hub plugin answered, but couldn't count its users. Check the app's logs for /admin-hub/rpc errors.");
+	return data.result;
+}
