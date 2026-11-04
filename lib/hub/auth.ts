@@ -21,7 +21,7 @@ async function hasPendingInvite(email: string): Promise<boolean> {
 }
 
 // Tolerate "admin-hub.vercel.app" or a trailing slash in HUB_URL.
-const hubUrl = (() => {
+export const hubUrl = (() => {
 	const raw = requireEnv("HUB_URL").trim().replace(/\/+$/, "");
 	return /^https?:\/\//.test(raw) ? raw : `https://${raw}`;
 })();

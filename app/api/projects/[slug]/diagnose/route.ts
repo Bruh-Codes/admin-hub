@@ -1,6 +1,7 @@
 import { hubAuth } from "@/lib/hub/auth";
 import { isApp } from "@/lib/hub/connection";
 import { canManage, getConnection, getMembership } from "@/lib/hub/projects";
+import { buildStudioAuthForDiagnose } from "@/lib/hub/product-studio";
 import { fetchSchema, remoteAdapter } from "@/lib/hub/remote-app";
 
 export const runtime = "nodejs";
@@ -35,6 +36,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
 		await step("findUsers", () => db.findMany({ model: "user", limit: 100000 }));
 		await step("findSessions", () => db.findMany({ model: "session", limit: 100000 }));
 		await step("findOrgs", () => db.findMany({ model: "organization", limit: 100000 }));
+		await step("studioAuth", async () => {
+			const ctx = await buildStudioAuthForDiagnose(project.id, c, schema!).$context;
+			const users = await ctx.adapter.findMany({ model: "user", limit: 100000 });
+			return `${users.length} users via the studio's auth`;
+		});
 	}
 	return Response.json(out);
 }

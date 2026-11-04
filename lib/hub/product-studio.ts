@@ -3,6 +3,7 @@ import { admin, organization, phoneNumber } from "better-auth/plugins";
 import { betterAuthStudio } from "better-auth-studio/nextjs";
 import { Pool } from "pg";
 import { sslFor } from "./pg-ssl";
+import { hubUrl } from "./auth";
 import { BLOCKED_TOOLS, SESSION_SECONDS } from "../studio-defaults";
 import { isApp, type ProductConnection } from "./connection";
 import { fetchSchema, remoteAdapter, rolesFrom, type AppConnection } from "./remote-app";
@@ -63,7 +64,7 @@ function buildAuth(projectId: string, c: ProductConnection, pool: Pool) {
 		database: pool,
 		secret: projectSecret(projectId),
 		// Never mounted; set so Better Auth does not warn about a missing URL.
-		baseURL: process.env.HUB_URL,
+		baseURL: hubUrl,
 		advanced: {
 			database: {
 				...(c.idStrategy === "uuid" ? { generateId: () => crypto.randomUUID() } : {}),
@@ -100,7 +101,7 @@ function buildAppAuth(projectId: string, c: AppConnection, schema: Awaited<Retur
 		// Model names stay Better Auth's own: the app's adapter maps them to its tables.
 		database: remoteAdapter(c, schema),
 		secret: projectSecret(projectId),
-		baseURL: process.env.HUB_URL,
+		baseURL: hubUrl,
 		advanced: { database: { generateId: false, validateSchema: false } },
 		emailAndPassword: { enabled: true, disableSignUp: true },
 		user: { additionalFields },
@@ -155,4 +156,9 @@ export async function getProductStudio(project: Project): Promise<Entry | null> 
 	const entry: Entry = { version: baseVersion, handler: makeHandler(project, buildAuth(project.id, c, pool)), pool, roles: c.roles };
 	cache.set(project.id, entry);
 	return entry;
+}
+
+/** The same auth the studio uses, for /api/projects/[slug]/diagnose. */
+export function buildStudioAuthForDiagnose(projectId: string, c: AppConnection, schema: Awaited<ReturnType<typeof fetchSchema>>) {
+	return buildAppAuth(projectId, c, schema, rolesFrom(schema));
 }
