@@ -49,7 +49,7 @@ export function NewProjectForm({ hubUrl }: { hubUrl: string }) {
 	}, []);
 
 	const slug = slugify(name);
-	const install = `curl -o lib/admin-hub.ts ${hubUrl || "https://your-hub.vercel.app"}/plugin/admin-hub.ts`;
+	const install = `curl -fsSL -o lib/admin-hub.ts ${hubUrl || "https://your-hub.vercel.app"}/plugin/admin-hub.ts`;
 	const env = `ADMIN_HUB_KEY=${key}`;
 
 	const s1 = slug ? "done" : "current";
@@ -104,7 +104,7 @@ export function NewProjectForm({ hubUrl }: { hubUrl: string }) {
 				<div className={slug ? "" : "dim"}>
 					<section className="onboard-section">
 						<h2>Install Plugin</h2>
-						<p>Run this in your app's project folder. It downloads one file next to your auth config (change the path if yours lives elsewhere).</p>
+						<p>Run this in the folder that holds your auth config's lib/ (change the path if yours lives elsewhere). On Windows PowerShell, type curl.exe instead of curl.</p>
 						<CopyBlock label="Terminal" code={install} onCopy={() => setInstalled(true)} />
 					</section>
 

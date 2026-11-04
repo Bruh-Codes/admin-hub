@@ -8,7 +8,8 @@ import { NewProjectForm } from "./form";
 export default async function NewProject() {
 	const { user } = await requireUser();
 	if (!hubOwners().includes(user.email.toLowerCase())) redirect("/projects");
-	const hubUrl = (process.env.HUB_URL ?? "").replace(/\/+$/, "");
+	const raw = (process.env.HUB_URL ?? "").trim().replace(/\/+$/, "");
+	const hubUrl = !raw || /^https?:\/\//.test(raw) ? raw : `https://${raw}`;
 	return (
 		<>
 			<header className="topbar">
