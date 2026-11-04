@@ -42,9 +42,13 @@ export const hubAuth = betterAuth({
 		const own: string[] = [];
 		if (request) {
 			try {
-				const host = request.headers.get("x-forwarded-host") ?? new URL(request.url).host;
+				const host = (request.headers.get("x-forwarded-host") ?? new URL(request.url).host).split(",")[0].trim();
 				own.push(`https://${host}`);
 			} catch {}
+			// The browser marks requests from our own pages as same-origin; a
+			// cross-site page can't forge this header, so its Origin is ours.
+			const origin = request.headers.get("origin");
+			if (origin && request.headers.get("sec-fetch-site") === "same-origin") own.push(origin);
 		}
 		return [hubUrl, ...vercelOrigins, ...own];
 	},
