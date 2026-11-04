@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { CopyBlock } from "@/components/copy-block";
-import { hubClient } from "@/lib/hub/client";
 
 const slugify = (s: string) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
 const KEY_STORE = "admin-hub:new-project-key";
@@ -68,27 +67,12 @@ export function NewProjectForm({ hubUrl }: { hubUrl: string }) {
 		setError(null);
 		const connection = { kind: "app", url: url.trim(), key, basePath: basePath.trim() || "/api/auth" };
 
-		setBusy("Checking your app…");
-		const test = await fetch("/api/connection-test", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(connection) });
-		const tested = await test.json().catch(() => ({}));
-		if (!test.ok) {
+		setBusy("Checking your app and creating the project…");
+		const res = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: name.trim(), slug, connection }) });
+		const out = await res.json().catch(() => ({}));
+		if (!res.ok) {
 			setBusy(null);
-			return setError(tested.error ?? "Could not reach your app.");
-		}
-
-		setBusy("Creating project…");
-		const { error } = await hubClient.organization.create({ name: name.trim(), slug, keepCurrentActiveOrganization: true });
-		if (error) {
-			setBusy(null);
-			return setError(error.message ?? "Could not create the project.");
-		}
-		const saved = await fetch(`/api/projects/${slug}/connection`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(connection) });
-		if (!saved.ok) {
-			// Keep the key: the project exists, but the hub couldn't store the
-			// connection. Say why instead of silently dropping to Settings.
-			const body = await saved.json().catch(() => ({}));
-			setBusy(null);
-			return setError(`The project was created, but the hub couldn't save the connection: ${body.error ?? `HTTP ${saved.status}`}. Fix that, then connect it from the project's Settings with the same key.`);
+			return setError(out.error ?? "Could not create the project.");
 		}
 		try { sessionStorage.removeItem(KEY_STORE); } catch {}
 		window.location.href = `/p/${slug}`;
