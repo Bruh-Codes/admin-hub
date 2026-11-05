@@ -129,11 +129,11 @@ export default function Dashboard() {
         ] as const;
 
         const darkPalette = [
+          { barClass: "bg-white/70 border border-white/10", dotClass: "bg-white/70" },
+          { barClass: "bg-white/50 border border-white/10", dotClass: "bg-white/50" },
+          { barClass: "bg-white/35 border border-white/10", dotClass: "bg-white/35" },
           { barClass: "bg-white/25 border border-white/10", dotClass: "bg-white/25" },
-          { barClass: "bg-white/20 border border-white/10", dotClass: "bg-white/20" },
           { barClass: "bg-white/15 border border-white/10", dotClass: "bg-white/15" },
-          { barClass: "bg-white/10 border border-white/10", dotClass: "bg-white/10" },
-          { barClass: "bg-white/5 border border-white/10", dotClass: "bg-white/5" },
         ] as const;
 
         return {
@@ -155,12 +155,14 @@ export default function Dashboard() {
     ? {
         top: "rgba(15, 23, 42, 0.78)",
         bottom: "rgba(15, 23, 42, 0.28)",
-        fill: "linear-gradient(to bottom, rgba(15, 23, 42, 0.82), rgba(15, 23, 42, 0.34))",
+        fill: "linear-gradient(to bottom, rgba(15, 23, 42, 0.45), rgba(15, 23, 42, 0.25))",
+        current: "linear-gradient(to bottom, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.65))",
       }
     : {
         top: "rgba(255, 255, 255, 0.3)",
         bottom: "rgba(255, 255, 255, 0.05)",
-        fill: "linear-gradient(to bottom, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.285))",
+        fill: "linear-gradient(to bottom, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.32))",
+        current: "linear-gradient(to bottom, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.7))",
       };
   const activityLoadingOverlayClass = isLightTheme
     ? "absolute inset-0 bg-white/70 backdrop-blur-sm flex items-center justify-center text-xs uppercase text-slate-500 pointer-events-none"
@@ -1482,8 +1484,12 @@ export default function Dashboard() {
                                     <div
                                       className="w-full h-full"
                                       style={{
-                                        background: totalUsersBarGradientStops.fill,
-                                        opacity: isHovered ? 1 : 0.8,
+                                        // The latest period (this hour/day) stands out.
+                                        background:
+                                          i === chartData.length - 1
+                                            ? totalUsersBarGradientStops.current
+                                            : totalUsersBarGradientStops.fill,
+                                        opacity: isHovered ? 1 : 0.9,
                                       }}
                                     />
                                   </div>
@@ -1590,7 +1596,11 @@ export default function Dashboard() {
                           return (
                             <div
                               key={`${label}-${index}`}
-                              className="flex-1 flex flex-col justify-end gap-[1px] h-full cursor-pointer"
+                              className={`flex-1 flex flex-col justify-end gap-[1px] h-full cursor-pointer transition-opacity ${
+                                index === resolvedActivityLabels.length - 1 || hoveredAreaIndex === index
+                                  ? "opacity-100"
+                                  : "opacity-70"
+                              }`}
                               onMouseEnter={(event) =>
                                 handleActivityHover(event, index, barHeightFraction)
                               }
