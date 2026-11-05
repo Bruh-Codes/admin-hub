@@ -10,7 +10,7 @@ export function ProjectSwitcher({ current, projects, canCreate }: { current: P; 
 		<div style={{ position: "relative" }}>
 			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="row" style={{ gap: 10, background: "none", border: "1px solid transparent", borderRadius: 8, color: "inherit", font: "inherit", cursor: "pointer", padding: "6px 10px" }}>
 				<span className="avatar" style={{ width: 28, height: 28, borderRadius: 7, fontSize: 14 }}>{current.name.slice(0, 1).toUpperCase()}</span>
-				<span style={{ fontWeight: 600, fontSize: 16 }}>{current.name}</span>
+				<span className="switcher-name" style={{ fontWeight: 600, fontSize: 16 }}>{current.name}</span>
 				<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden style={{ color: "var(--muted)" }}><path d="M5 6l3-3 3 3M5 10l3 3 3-3" stroke="currentColor" fill="none" strokeWidth="1.5" /></svg>
 			</button>
 			{open ? (

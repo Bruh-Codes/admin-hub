@@ -58,7 +58,15 @@ p { margin: 0; }
 .tab:hover { color: var(--text); }
 .tab[aria-current="page"] { color: var(--text); border-bottom-color: var(--text); }
 .divider { color: var(--line-2); font-size: 22px; font-weight: 300; }
-@media (max-width: 720px) { .topbar { padding: 0 12px; gap: 8px; overflow-x: auto; } .tab { padding: 0 10px; } .hide-sm { display: none; } }
+/* Mobile: two rows like Vercel. Project + actions on top, tabs underneath. */
+@media (max-width: 720px) {
+  .topbar { height: auto; flex-wrap: wrap; padding: 8px 12px 0; gap: 6px 8px; }
+  .topbar > .tabs { order: 10; flex: 1 0 100%; height: 44px; margin: 0 -12px; padding: 0 4px; overflow-x: auto; scrollbar-width: none; }
+  .topbar > .tabs::-webkit-scrollbar { display: none; }
+  .tab { padding: 0 12px; white-space: nowrap; }
+  .hide-sm { display: none; }
+  .switcher-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
 .project-card { transition: border-color .15s; }
 .project-card:hover { border-color: #525252; }
 .setup { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; background: var(--bg); }
@@ -115,4 +123,4 @@ a.choose-card:hover { border-color: #525252; }
 .search-btn kbd { margin-left: auto; font-family: var(--font-mono), monospace; font-size: 12px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line-2); color: var(--faint); }
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--panel); color: var(--muted); cursor: pointer; }
 .icon-btn:hover { border-color: #525252; color: var(--text); }
-@media (max-width: 720px) { .search-btn { min-width: 0; padding: 0 11px; } }
+@media (max-width: 720px) { .studio-actions { gap: 6px; margin-right: 2px; } .icon-btn, .search-btn { min-width: 0; width: 36px; height: 36px; padding: 0; justify-content: center; } }
