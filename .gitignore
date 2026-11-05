@@ -5,3 +5,7 @@ node_modules
 *.tsbuildinfo
 next-env.d.ts
 .vercel
+
+# Built studio UI (npm run studio-ui)
+studio-ui/dist
+studio-ui/node_modules

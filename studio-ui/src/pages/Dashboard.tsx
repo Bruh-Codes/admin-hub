@@ -1,0 +1,2699 @@
+import { format } from "date-fns";
+import { ArrowUpRight, Shield } from "lucide-react";
+import { type MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useCounts } from "@/contexts/CountsContext";
+import { useTheme } from "@/contexts/ThemeContext";
+import { DashboardLayoutGrid } from "@/components/dashboard-widgets/DashboardLayoutGrid";
+import {
+  AlertTriangle,
+  ArrowRight,
+  BarChart3,
+  Building2,
+  Calendar as CalendarIcon,
+  CheckCircle,
+  ChevronDown,
+  Clock,
+  Copy,
+  Database,
+  Search,
+  Settings,
+  Users,
+  X,
+  Zap,
+} from "../components/PixelIcons";
+import OrganizationsPage from "./Organizations";
+import UsersPage from "./Users";
+
+const ACTIVITY_STREAMS = [
+  {
+    id: "signups",
+    label: "Signups",
+    analyticsKey: "newUsers",
+  },
+  {
+    id: "logins",
+    label: "Logins",
+    analyticsKey: "activeUsers",
+  },
+  {
+    id: "organizations",
+    label: "Organizations",
+    analyticsKey: "organizations",
+  },
+  {
+    id: "teams",
+    label: "Teams",
+    analyticsKey: "teams",
+  },
+  {
+    id: "sessions",
+    label: "Sessions",
+    analyticsKey: "sessions",
+  },
+] as const;
+
+interface SecurityPatch {
+  id: string;
+  title: string;
+  severity: "critical" | "high" | "medium" | "low";
+  date: string;
+  description: string;
+  affectedComponents: string[];
+  status: "pending" | "applied" | "scheduled";
+  cve?: string;
+}
+
+export default function Dashboard() {
+  const { theme } = useTheme();
+  const [activeTab] = useState("overview");
+  const [showQuickActionsModal, setShowQuickActionsModal] = useState(false);
+  const [activeUsersDaily, setActiveUsersDaily] = useState(0);
+  const [newUsersDaily, setNewUsersDaily] = useState(0);
+  const [selectedUserPeriod, setSelectedUserPeriod] = useState("1D");
+  const [activityPeriod, setActivityPeriod] = useState("1D");
+  const [selectedPatch, setSelectedPatch] = useState<SecurityPatch | null>(null);
+  const [showPatchModal, setShowPatchModal] = useState(false);
+  const [activeUsersPeriod, setActiveUsersPeriod] = useState("Daily");
+  const [newUsersPeriod, setNewUsersPeriod] = useState("Daily");
+  const [organizationsPeriod, setOrganizationsPeriod] = useState("Daily");
+  const [teamsPeriod, setTeamsPeriod] = useState("Daily");
+  const [showActiveUsersDropdown, setShowActiveUsersDropdown] = useState(false);
+  const [showNewUsersDropdown, setShowNewUsersDropdown] = useState(false);
+  const [showOrganizationsDropdown, setShowOrganizationsDropdown] = useState(false);
+  const [showTeamsDropdown, setShowTeamsDropdown] = useState(false);
+  const [betterAuthVersion, setBetterAuthVersion] = useState<{
+    current: string;
+    latest: string;
+    isOutdated: boolean;
+  } | null>(null);
+  const [hoveredUsersAreaIndex, setHoveredUsersAreaIndex] = useState<number | null>(null);
+  const [hoveredUsersAreaPosition, setHoveredUsersAreaPosition] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const [hoveredAreaIndex, setHoveredAreaIndex] = useState<number | null>(null);
+  const [hoveredAreaPosition, setHoveredAreaPosition] = useState<{ x: number; y: number } | null>(
+    null,
+  );
+
+  const isLightTheme = theme === "light";
+  const activityStreams = useMemo(
+    () =>
+      ACTIVITY_STREAMS.map((stream, index) => {
+        const lightPalette = [
+          {
+            barClass: "bg-slate-900/75 border border-slate-900/10",
+            dotClass: "bg-slate-900/75",
+          },
+          {
+            barClass: "bg-slate-900/55 border border-slate-900/10",
+            dotClass: "bg-slate-900/55",
+          },
+          {
+            barClass: "bg-slate-900/40 border border-slate-900/10",
+            dotClass: "bg-slate-900/40",
+          },
+          {
+            barClass: "bg-slate-900/28 border border-slate-900/10",
+            dotClass: "bg-slate-900/28",
+          },
+          {
+            barClass: "bg-slate-900/18 border border-slate-900/10",
+            dotClass: "bg-slate-900/18",
+          },
+        ] as const;
+
+        const darkPalette = [
+          { barClass: "bg-white/25 border border-white/10", dotClass: "bg-white/25" },
+          { barClass: "bg-white/20 border border-white/10", dotClass: "bg-white/20" },
+          { barClass: "bg-white/15 border border-white/10", dotClass: "bg-white/15" },
+          { barClass: "bg-white/10 border border-white/10", dotClass: "bg-white/10" },
+          { barClass: "bg-white/5 border border-white/10", dotClass: "bg-white/5" },
+        ] as const;
+
+        return {
+          ...stream,
+          ...(isLightTheme ? lightPalette[index] : darkPalette[index]),
+        };
+      }),
+    [isLightTheme],
+  );
+  const totalUsersGridLineClass = isLightTheme ? "bg-slate-900/10" : "bg-white/10";
+  const totalUsersAxisTextClass = isLightTheme ? "text-slate-500" : "text-gray-500";
+  const chartTooltipClass = isLightTheme
+    ? "bg-white border border-slate-200 shadow-xl"
+    : "bg-black border border-white/20 shadow-lg";
+  const chartTooltipLabelClass = isLightTheme ? "text-slate-500" : "text-gray-400";
+  const chartTooltipValueClass = isLightTheme ? "text-slate-950" : "text-white";
+  const chartTooltipMetaClass = isLightTheme ? "text-slate-500" : "text-gray-400";
+  const totalUsersBarGradientStops = isLightTheme
+    ? {
+        top: "rgba(15, 23, 42, 0.78)",
+        bottom: "rgba(15, 23, 42, 0.28)",
+        fill: "linear-gradient(to bottom, rgba(15, 23, 42, 0.82), rgba(15, 23, 42, 0.34))",
+      }
+    : {
+        top: "rgba(255, 255, 255, 0.3)",
+        bottom: "rgba(255, 255, 255, 0.05)",
+        fill: "linear-gradient(to bottom, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.285))",
+      };
+  const activityLoadingOverlayClass = isLightTheme
+    ? "absolute inset-0 bg-white/70 backdrop-blur-sm flex items-center justify-center text-xs uppercase text-slate-500 pointer-events-none"
+    : "absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center text-xs uppercase text-gray-400 pointer-events-none";
+  const activityTooltipSeriesLabelClass = isLightTheme ? "text-slate-600" : "text-gray-300";
+  const activityTooltipUniqueLabelClass = isLightTheme ? "text-slate-500" : "text-gray-500";
+  const activityLegendTextClass = isLightTheme ? "text-slate-600" : "text-gray-400";
+  const activityLegendValueClass = isLightTheme ? "text-slate-950" : "text-white";
+
+
+  // Custom date range states
+  const [activeUsersDateFrom, setActiveUsersDateFrom] = useState<Date | undefined>(undefined);
+  const [activeUsersDateTo, setActiveUsersDateTo] = useState<Date | undefined>(undefined);
+  const [newUsersDateFrom, setNewUsersDateFrom] = useState<Date | undefined>(undefined);
+  const [newUsersDateTo, setNewUsersDateTo] = useState<Date | undefined>(undefined);
+  const [organizationsDateFrom, setOrganizationsDateFrom] = useState<Date | undefined>(undefined);
+  const [organizationsDateTo, setOrganizationsDateTo] = useState<Date | undefined>(undefined);
+  const [teamsDateFrom, setTeamsDateFrom] = useState<Date | undefined>(undefined);
+  const [teamsDateTo, setTeamsDateTo] = useState<Date | undefined>(undefined);
+
+  // Analytics data and percentages
+  const [totalUsersData, setTotalUsersData] = useState<number[]>([]);
+  const [totalUsersLabels, setTotalUsersLabels] = useState<string[]>([]);
+  const [totalUsersPercentage, setTotalUsersPercentage] = useState(0);
+  const [newUsersData, setNewUsersData] = useState<number[]>([]);
+  const [newUsersLabels, setNewUsersLabels] = useState<string[]>([]);
+  const [activeUsersPercentage, setActiveUsersPercentage] = useState(0);
+  const [organizationsPercentage, setOrganizationsPercentage] = useState(0);
+  const [teamsPercentage, setTeamsPercentage] = useState(0);
+  const [organizationsCount, setOrganizationsCount] = useState(0);
+  const [teamsCount, setTeamsCount] = useState(0);
+  const [organizationsLoading, setOrganizationsLoading] = useState(false);
+  const [teamsLoading, setTeamsLoading] = useState(false);
+  const [activitySeries, setActivitySeries] = useState<Record<string, number[]>>({
+    signups: [],
+    logins: [],
+    organizations: [],
+    teams: [],
+    sessions: [],
+  });
+  const [loginsUniqueUsers, setLoginsUniqueUsers] = useState<number[]>([]);
+  const [activityLabels, setActivityLabels] = useState<string[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+
+  // Daily percentages for stats bar
+  const [usersDailyPercentage, setUsersDailyPercentage] = useState(0);
+  const [organizationsDailyPercentage, setOrganizationsDailyPercentage] = useState(0);
+  const [sessionsDailyPercentage, setSessionsDailyPercentage] = useState(0);
+  const [activityHitsDailyPercentage, setActivityHitsDailyPercentage] = useState(0);
+  const [activityHitsDailyTotal, setActivityHitsDailyTotal] = useState(0);
+
+  // Store all users for client-side filtering
+  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [_newUsersCount, setNewUsersCount] = useState(0);
+  const [newUsersCountPercentage, setNewUsersCountPercentage] = useState(0);
+  const [newUsersDailyPercentage, setNewUsersDailyPercentage] = useState(0);
+
+  const { counts, loading } = useCounts();
+  const navigate = useNavigate();
+
+  const periodOptions = ["Daily", "Weekly", "Monthly", "Yearly", "Custom"];
+  const analyticsPeriodMap: Record<string, string> = {
+    Daily: "1D",
+    Weekly: "1W",
+    Monthly: "1M",
+    Yearly: "1Y",
+    Custom: "Custom",
+  };
+
+  const compactNumberFormatter = useMemo(
+    () =>
+      new Intl.NumberFormat("en-US", {
+        notation: "compact",
+        maximumFractionDigits: 1,
+      }),
+    [],
+  );
+
+  const formatCompactNumber = (value: number | null | undefined) => {
+    if (value === null || value === undefined) {
+      return "...";
+    }
+    return compactNumberFormatter.format(Number(value));
+  };
+
+  const formatFullNumber = (value: number | null | undefined) => {
+    if (value === null || value === undefined) {
+      return "...";
+    }
+    return Number(value).toLocaleString();
+  };
+
+  const activityTotals = useMemo(() => {
+    return ACTIVITY_STREAMS.reduce<Record<string, number>>((acc, stream) => {
+      acc[stream.id] = (activitySeries[stream.id] || []).reduce((sum, value) => sum + value, 0);
+      return acc;
+    }, {});
+  }, [activitySeries]);
+
+  const activityGrandTotal = useMemo(
+    () => Object.values(activityTotals).reduce((sum, val) => sum + val, 0),
+    [activityTotals],
+  );
+
+  const handleActivityHover = (
+    event: MouseEvent<HTMLDivElement>,
+    index: number,
+    barHeightFraction: number,
+  ) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const barTopY = rect.bottom - barHeightFraction * rect.height;
+    const elevatedY = barTopY - 8;
+    const tooltipWidth = 200;
+    const tooltipHeight = 140;
+    const padding = 12;
+    const constrainedX = Math.max(
+      tooltipWidth / 2 + padding,
+      Math.min(window.innerWidth - tooltipWidth / 2 - padding, x),
+    );
+    const constrainedY = Math.max(
+      tooltipHeight + padding,
+      Math.min(window.innerHeight - padding, elevatedY),
+    );
+    setHoveredAreaIndex(index);
+    setHoveredAreaPosition({ x: constrainedX, y: constrainedY - 15 });
+  };
+
+  // Security insights data - better-auth specific
+  const getSecurityPatches = (): SecurityPatch[] => {
+    const patches: SecurityPatch[] = [];
+
+    if (betterAuthVersion?.isOutdated) {
+      patches.push({
+        id: "version-check",
+        title: `Update Better-Auth to v${betterAuthVersion.latest}`,
+        severity: "high",
+        date: new Date().toISOString().split("T")[0],
+        description: `Your current version is outdated. Update to the latest version to get the latest security fixes, features, and improvements. Run: \`pnpm install better-auth@latest\``,
+        affectedComponents: ["All Components"],
+        status: "pending",
+        cve: "",
+      });
+    } else if (betterAuthVersion) {
+      patches.push({
+        id: "version-check",
+        title: `Better-Auth is Up to date`,
+        severity: "low",
+        date: new Date().toISOString().split("T")[0],
+        description: `You are running the latest version of better-auth. Great job keeping your dependencies up to date!`,
+        affectedComponents: ["All Components"],
+        status: "applied",
+        cve: "",
+      });
+    }
+
+    patches.push(
+      //   {
+      //   id: '1',
+      //   title: 'Session Token Rotation',
+      //   severity: 'high',
+      //   date: '2024-01-15',
+      //   description:
+      //     'Ensure session tokens are rotated regularly to prevent session fixation attacks. Better-auth supports automatic token rotation on security-sensitive operations.',
+      //   affectedComponents: ['Session Management', 'Auth Core'],
+      //   status: 'applied',
+      //   cve: '',
+      // }
+    );
+
+    // patches.push({
+    //   id: '2',
+    //   title: 'CSRF Protection Enabled',
+    //   severity: 'critical',
+    //   date: '2024-01-12',
+    //   description:
+    //     'Cross-Site Request Forgery protection is enabled by default in better-auth. Verify CSRF tokens are being validated on all state-changing requests.',
+    //   affectedComponents: ['API Routes', 'Middleware'],
+    //   status: 'applied',
+    //   cve: '',
+    // });
+
+    patches.push({
+      id: "3",
+      title: "Rate Limiting Configuration",
+      severity: "medium",
+      date: new Date().toISOString().split("T")[0],
+      description:
+        "Configure rate limiting for authentication endpoints to prevent brute force attacks. Better-auth provides built-in rate limiting middleware.",
+      affectedComponents: ["Auth Endpoints"],
+      status: "pending",
+    });
+
+    // patches.push({
+    //   id: '4',
+    //   title: 'Secure Cookie Settings',
+    //   severity: 'high',
+    //   date: '2024-01-08',
+    //   description:
+    //     'Ensure cookies are configured with secure, httpOnly, and sameSite flags. Better-auth sets secure defaults but verify your production configuration.',
+    //   affectedComponents: ['Cookie Configuration'],
+    //   status: 'applied',
+    // });
+
+    // patches.push({
+    //   id: '5',
+    //   title: 'Password Policy Enforcement',
+    //   severity: 'medium',
+    //   date: '2024-01-05',
+    //   description:
+    //     'Implement strong password policies using better-auth password validation hooks. Recommended: minimum 8 characters, mixed case, numbers, and symbols.',
+    //   affectedComponents: ['User Registration', 'Password Reset'],
+    //   status: 'pending',
+    // });
+
+    // Only return unpatched (pending) security issues
+    return patches.filter((patch) => patch.status !== "applied");
+  };
+
+  const securityPatches = getSecurityPatches();
+
+  const fetchAnalytics = useCallback(
+    async (type: string, period: string, from?: Date, to?: Date) => {
+      try {
+        const params = new URLSearchParams({ type, period });
+        if (from) params.append("from", from.toISOString());
+        if (to) params.append("to", to.toISOString());
+
+        const response = await fetch(`/api/analytics?${params.toString()}`);
+        return await response.json();
+      } catch (_error) {
+        return null;
+      }
+    },
+    [],
+  );
+
+  // Fetch all users once for client-side filtering
+  useEffect(() => {
+    const fetchAllUsers = async () => {
+      try {
+        const response = await fetch("/api/users/all");
+        const data = await response.json();
+        if (data?.success && data.users) {
+          setAllUsers(data.users);
+        }
+      } catch (_error) {
+        setAllUsers([]);
+      }
+    };
+    fetchAllUsers();
+  }, []);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const response = await fetch("/api/stats");
+        const data = await response.json();
+        if (data) {
+          setActiveUsersDaily(data.activeUsers || 0);
+        }
+      } catch (_error) {
+        setActiveUsersDaily(0);
+      }
+    };
+    fetchStats();
+  }, []);
+
+  // Fetch total users chart analytics
+  useEffect(() => {
+    const fetchData = async () => {
+      const data = await fetchAnalytics(
+        "users",
+        selectedUserPeriod,
+        activeUsersDateFrom,
+        activeUsersDateTo,
+      );
+      if (data) {
+        setTotalUsersData(data.data || []);
+        setTotalUsersLabels(data.labels || []);
+        setTotalUsersPercentage(data.percentageChange || 0);
+      }
+    };
+    fetchData();
+  }, [selectedUserPeriod, activeUsersDateFrom, activeUsersDateTo, fetchAnalytics]);
+
+  // Calculate new users count and percentage from fetched users
+  useEffect(() => {
+    if (allUsers.length === 0) {
+      setNewUsersCount(0);
+      setNewUsersCountPercentage(0);
+      return;
+    }
+
+    const now = new Date();
+    let currentPeriodStart: Date;
+    let currentPeriodEnd: Date = now;
+    let previousPeriodStart: Date;
+    let previousPeriodEnd: Date;
+
+    // Determine date ranges based on period
+    if (newUsersPeriod === "Custom") {
+      if (!newUsersDateFrom || !newUsersDateTo) {
+        setNewUsersCount(0);
+        setNewUsersCountPercentage(0);
+        return;
+      }
+      currentPeriodStart = new Date(newUsersDateFrom);
+      currentPeriodEnd = new Date(newUsersDateTo);
+      currentPeriodEnd.setHours(23, 59, 59, 999);
+
+      const periodDuration = currentPeriodEnd.getTime() - currentPeriodStart.getTime();
+      previousPeriodEnd = new Date(currentPeriodStart.getTime() - 1);
+      previousPeriodStart = new Date(previousPeriodEnd.getTime() - periodDuration);
+    } else {
+      switch (newUsersPeriod) {
+        case "Daily":
+          currentPeriodStart = new Date(now);
+          currentPeriodStart.setHours(0, 0, 0, 0);
+          previousPeriodEnd = new Date(currentPeriodStart.getTime() - 1);
+          previousPeriodStart = new Date(previousPeriodEnd.getTime() - 24 * 60 * 60 * 1000);
+          break;
+        case "Weekly":
+          currentPeriodStart = new Date(now);
+          currentPeriodStart.setDate(now.getDate() - now.getDay());
+          currentPeriodStart.setHours(0, 0, 0, 0);
+          previousPeriodEnd = new Date(currentPeriodStart.getTime() - 1);
+          previousPeriodStart = new Date(previousPeriodEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        case "Monthly":
+          currentPeriodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+          currentPeriodStart.setHours(0, 0, 0, 0);
+          previousPeriodEnd = new Date(currentPeriodStart.getTime() - 1);
+          previousPeriodStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          previousPeriodStart.setHours(0, 0, 0, 0);
+          break;
+        case "Yearly":
+          currentPeriodStart = new Date(now.getFullYear(), 0, 1);
+          currentPeriodStart.setHours(0, 0, 0, 0);
+          previousPeriodEnd = new Date(currentPeriodStart.getTime() - 1);
+          previousPeriodStart = new Date(now.getFullYear() - 1, 0, 1);
+          previousPeriodStart.setHours(0, 0, 0, 0);
+          break;
+        default:
+          setNewUsersCount(0);
+          setNewUsersCountPercentage(0);
+          return;
+      }
+    }
+
+    const currentPeriodUsers = allUsers.filter((user: any) => {
+      if (!user.createdAt) return false;
+      const createdAt = new Date(user.createdAt);
+      return createdAt >= currentPeriodStart && createdAt <= currentPeriodEnd;
+    });
+
+    const previousPeriodUsers = allUsers.filter((user: any) => {
+      if (!user.createdAt) return false;
+      const createdAt = new Date(user.createdAt);
+      return createdAt >= previousPeriodStart && createdAt <= previousPeriodEnd;
+    });
+
+    const currentCount = currentPeriodUsers.length;
+    const previousCount = previousPeriodUsers.length;
+
+    let percentageChange = 0;
+    if (previousCount > 0) {
+      percentageChange = ((currentCount - previousCount) / previousCount) * 100;
+    } else if (currentCount > 0) {
+      percentageChange = 100; // 100% increase if no previous data
+    }
+
+    setNewUsersCount(currentCount);
+    setNewUsersCountPercentage(percentageChange);
+  }, [allUsers, newUsersPeriod, newUsersDateFrom, newUsersDateTo]);
+
+  // Fetch activity analytics (signups, logins, organizations, teams, sessions)
+  useEffect(() => {
+    const fetchData = async () => {
+      if (activityPeriod === "Custom" && (!newUsersDateFrom || !newUsersDateTo)) {
+        return;
+      }
+      setActivityLoading(true);
+      try {
+        const [signups, logins, orgs, teamsMetrics, sessionsMetrics] = await Promise.all([
+          fetchAnalytics("newUsers", activityPeriod, newUsersDateFrom, newUsersDateTo),
+          fetchAnalytics("activeUsers", activityPeriod, newUsersDateFrom, newUsersDateTo),
+          fetchAnalytics("organizations", activityPeriod, newUsersDateFrom, newUsersDateTo),
+          fetchAnalytics("teams", activityPeriod, newUsersDateFrom, newUsersDateTo),
+          fetchAnalytics("sessions", activityPeriod, newUsersDateFrom, newUsersDateTo),
+        ]);
+
+        if (signups) {
+          setNewUsersData(signups.data || []);
+          setNewUsersLabels(signups.labels || []);
+        }
+
+        setActivitySeries({
+          signups: signups?.data || [],
+          logins: logins?.data || [],
+          organizations: orgs?.data || [],
+          teams: teamsMetrics?.data || [],
+          sessions: sessionsMetrics?.data || [],
+        });
+
+        // Store unique users per bucket for login tooltip
+        setLoginsUniqueUsers(logins?.uniqueUsers || []);
+
+        setActivityLabels(
+          signups?.labels ||
+            logins?.labels ||
+            orgs?.labels ||
+            teamsMetrics?.labels ||
+            sessionsMetrics?.labels ||
+            [],
+        );
+      } finally {
+        setActivityLoading(false);
+      }
+    };
+    fetchData();
+  }, [activityPeriod, newUsersDateFrom, newUsersDateTo, fetchAnalytics]);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      const data = await fetchAnalytics("activeUsers", "1D");
+      if (data) setActiveUsersPercentage(data.percentageChange || 0);
+    };
+    fetchData();
+  }, [fetchAnalytics]);
+
+  useEffect(() => {
+    const fetchOrganizationMetrics = async () => {
+      const mappedPeriod = analyticsPeriodMap[organizationsPeriod] || "1D";
+      const isCustom = mappedPeriod === "Custom";
+      if (isCustom && (!organizationsDateFrom || !organizationsDateTo)) {
+        return;
+      }
+
+      setOrganizationsLoading(true);
+      try {
+        const data = await fetchAnalytics(
+          "organizations",
+          mappedPeriod,
+          isCustom ? organizationsDateFrom : undefined,
+          isCustom ? organizationsDateTo : undefined,
+        );
+
+        if (data) {
+          setOrganizationsCount(data.total || 0);
+          setOrganizationsPercentage(data.percentageChange || 0);
+        }
+      } catch {
+        setOrganizationsCount(0);
+        setOrganizationsPercentage(0);
+      } finally {
+        setOrganizationsLoading(false);
+      }
+    };
+
+    fetchOrganizationMetrics();
+  }, [organizationsPeriod, organizationsDateFrom, organizationsDateTo, fetchAnalytics]);
+
+  useEffect(() => {
+    const fetchTeamMetrics = async () => {
+      const mappedPeriod = analyticsPeriodMap[teamsPeriod] || "1D";
+      const isCustom = mappedPeriod === "Custom";
+      if (isCustom && (!teamsDateFrom || !teamsDateTo)) {
+        return;
+      }
+
+      setTeamsLoading(true);
+      try {
+        const data = await fetchAnalytics(
+          "teams",
+          mappedPeriod,
+          isCustom ? teamsDateFrom : undefined,
+          isCustom ? teamsDateTo : undefined,
+        );
+
+        if (data) {
+          setTeamsCount(data.total || 0);
+          setTeamsPercentage(data.percentageChange || 0);
+        }
+      } catch {
+        setTeamsCount(0);
+        setTeamsPercentage(0);
+      } finally {
+        setTeamsLoading(false);
+      }
+    };
+
+    fetchTeamMetrics();
+  }, [teamsPeriod, teamsDateFrom, teamsDateTo, fetchAnalytics]);
+
+  useEffect(() => {
+    const fetchDailyPercentages = async () => {
+      const usersData = await fetchAnalytics("users", "1D");
+      if (usersData) setUsersDailyPercentage(usersData.percentageChange || 0);
+
+      const orgsData = await fetchAnalytics("organizations", "1D");
+      if (orgsData) setOrganizationsDailyPercentage(orgsData.percentageChange || 0);
+
+      const sessionsData = await fetchAnalytics("activeUsers", "1D");
+      if (sessionsData) setSessionsDailyPercentage(sessionsData.percentageChange || 0);
+
+      const [signupsData, loginsData, orgsDataForActivity, teamsData, sessionsMetricsData] =
+        await Promise.all([
+          fetchAnalytics("newUsers", "1D"),
+          fetchAnalytics("activeUsers", "1D"),
+          fetchAnalytics("organizations", "1D"),
+          fetchAnalytics("teams", "1D"),
+          fetchAnalytics("sessions", "1D"),
+        ]);
+
+      if (signupsData) {
+        setNewUsersDaily(signupsData.total || 0);
+        setNewUsersDailyPercentage(signupsData.percentageChange || 0);
+      } else {
+        setNewUsersDaily(0);
+        setNewUsersDailyPercentage(0);
+      }
+
+      const dailyTotals = [
+        signupsData?.total || 0,
+        loginsData?.total || 0,
+        orgsDataForActivity?.total || 0,
+        teamsData?.total || 0,
+        sessionsMetricsData?.total || 0,
+      ];
+      const activityHitsTotal = dailyTotals.reduce((sum, val) => sum + val, 0);
+      setActivityHitsDailyTotal(activityHitsTotal);
+
+      const previousDayTotals = [
+        signupsData?.previousTotal || 0,
+        loginsData?.previousTotal || 0,
+        orgsDataForActivity?.previousTotal || 0,
+        teamsData?.previousTotal || 0,
+        sessionsMetricsData?.previousTotal || 0,
+      ];
+      const previousDayTotal = previousDayTotals.reduce((sum, val) => sum + val, 0);
+
+      if (previousDayTotal > 0) {
+        const percentageChange = ((activityHitsTotal - previousDayTotal) / previousDayTotal) * 100;
+        setActivityHitsDailyPercentage(percentageChange);
+      } else if (activityHitsTotal > 0) {
+        setActivityHitsDailyPercentage(100);
+      } else {
+        setActivityHitsDailyPercentage(0);
+      }
+    };
+    fetchDailyPercentages();
+  }, [fetchAnalytics]);
+
+  useEffect(() => {
+    const checkBetterAuthVersion = async () => {
+      try {
+        const response = await fetch("/api/version-check");
+        const data = await response.json();
+        if (data) {
+          setBetterAuthVersion({
+            current: data.current || "1.0.0",
+            latest: data.latest || "1.0.0",
+            isOutdated: data.isOutdated || false,
+          });
+        }
+      } catch (_error) {
+        try {
+          const pkgResponse = await fetch("/api/package-info");
+          const pkgData = await pkgResponse.json();
+          const current = pkgData.betterAuthVersion || "1.0.0";
+          const latest = "1.5.0";
+          setBetterAuthVersion({
+            current,
+            latest,
+            isOutdated: current !== latest,
+          });
+        } catch {
+          setBetterAuthVersion({
+            current: "1.0.0",
+            latest: "1.5.0",
+            isOutdated: true,
+          });
+        }
+      }
+    };
+    checkBetterAuthVersion();
+  }, []);
+
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case "critical":
+        return "bg-white/10 text-white border-white/20";
+      case "high":
+        return "bg-white/10 text-white border-white/20";
+      case "medium":
+        return "bg-white/10 text-gray-300 border-white/20";
+      case "low":
+        return "bg-white/10 text-gray-400 border-white/20";
+      default:
+        return "bg-white/10 text-gray-400 border-white/20";
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "applied":
+        return "bg-white/10 text-white border-white/20";
+      case "scheduled":
+        return "bg-white/10 text-gray-300 border-white/20";
+      case "pending":
+        return "bg-white/10 text-gray-400 border-white/20";
+      default:
+        return "bg-white/10 text-gray-400 border-white/20";
+    }
+  };
+
+  const handlePatchClick = (patch: SecurityPatch) => {
+    setSelectedPatch(patch);
+    setShowPatchModal(true);
+  };
+
+  const closePatchModal = () => {
+    setShowPatchModal(false);
+    setTimeout(() => setSelectedPatch(null), 300);
+  };
+
+  const getAllSpanMonths = () => {
+    if (!allUsers || allUsers.length === 0) return 0;
+    const earliest = allUsers.reduce<Date | null>((acc, user) => {
+      const createdAt = user?.createdAt ? new Date(user.createdAt) : null;
+      if (!createdAt || Number.isNaN(createdAt.getTime())) return acc;
+      if (!acc) return createdAt;
+      return createdAt < acc ? createdAt : acc;
+    }, null);
+    if (!earliest) return 0;
+    const now = new Date();
+    const months =
+      (now.getFullYear() - earliest.getFullYear()) * 12 +
+      (now.getMonth() - earliest.getMonth()) +
+      1; // inclusive of current month
+    return Math.max(months, 0);
+  };
+
+  const buildAllLabelsForUsers = () => {
+    const monthsDiff = getAllSpanMonths();
+    // Default to 12 labels if we cannot infer span
+    if (monthsDiff <= 0) {
+      return { labels: Array.from({ length: 12 }, (_, i) => `Week ${i + 1}`), expectedLength: 12 };
+    }
+
+    if (monthsDiff < 3) {
+      // Show 12 weekly buckets
+      return { labels: Array.from({ length: 12 }, (_, i) => `Week ${i + 1}`), expectedLength: 12 };
+    }
+
+    if (monthsDiff <= 12) {
+      // Show 12 month labels starting from the first user's month
+      const earliest = allUsers.reduce<Date | null>((acc, user) => {
+        const createdAt = user?.createdAt ? new Date(user.createdAt) : null;
+        if (!createdAt || Number.isNaN(createdAt.getTime())) return acc;
+        if (!acc) return createdAt;
+        return createdAt < acc ? createdAt : acc;
+      }, null);
+      const start = earliest || new Date();
+      const labels = Array.from({ length: 12 }, (_, i) => {
+        const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
+        return d.toLocaleDateString("en-US", { month: "short" });
+      });
+      return { labels, expectedLength: labels.length };
+    }
+
+    // > 12 months: show yearly labels, number of labels = ceil(months/12)
+    const yearsCount = Math.max(1, Math.ceil(monthsDiff / 12));
+    const earliest = allUsers.reduce<Date | null>((acc, user) => {
+      const createdAt = user?.createdAt ? new Date(user.createdAt) : null;
+      if (!createdAt || Number.isNaN(createdAt.getTime())) return acc;
+      if (!acc) return createdAt;
+      return createdAt < acc ? createdAt : acc;
+    }, null);
+    const startYear = (earliest || new Date()).getFullYear();
+    const labels = Array.from({ length: yearsCount }, (_, i) => `${startYear + i}`);
+    return { labels, expectedLength: labels.length };
+  };
+
+  const getChartLabels = (
+    period: string,
+    dataSource: "users" | "newUsers" | "activity" = "users",
+  ) => {
+    const labels =
+      dataSource === "users"
+        ? totalUsersLabels
+        : dataSource === "newUsers"
+          ? newUsersLabels
+          : activityLabels;
+    const lengths: Record<string, number> = {
+      "1D": 24,
+      "1W": 7,
+      "1M": 30,
+      "3M": 3,
+      "6M": 6,
+      "1Y": 12,
+      ALL: 7,
+    };
+    if (period === "ALL") {
+      if (dataSource === "users" || dataSource === "activity") {
+        const { labels: allLabels } = buildAllLabelsForUsers();
+        return allLabels;
+      }
+      return [];
+    }
+
+    const expectedLength = lengths[period] || 7;
+
+    if (labels && labels.length > 0 && labels.length === expectedLength) {
+      if (period === "1D") {
+        return labels
+          .filter((_, i) => i % 4 === 0)
+          .map((label) => {
+            const hour = parseInt(label.replace("h", ""), 10);
+            if (hour === 0) return "12am";
+            if (hour < 12) return `${hour}am`;
+            if (hour === 12) return "12pm";
+            return `${hour - 12}pm`;
+          });
+      }
+      if (period === "1W") {
+        return labels.map((label) => {
+          return label.length > 3 ? label.substring(0, 3) : label;
+        });
+      }
+      if (period === "1M") {
+        return labels.map((label) => {
+          const parts = label.split(" ");
+          if (parts.length >= 2) {
+            return parts[1];
+          }
+          return label;
+        });
+      }
+      if (period === "1Y" || period === "3M" || period === "6M") {
+        return labels.map((label) => {
+          return label.length > 3 ? label.substring(0, 3) : label;
+        });
+      }
+      return labels.map((label) => {
+        if (label.length > 3) return label.substring(0, 3);
+        return label;
+      });
+    }
+
+    const now = new Date();
+    switch (period) {
+      case "1D":
+        return ["12am", "4am", "8am", "12pm", "4pm", "8pm"];
+      case "1W":
+        return Array.from({ length: 7 }, (_, i) => {
+          const date = new Date(now.getTime() - (6 - i) * 24 * 60 * 60 * 1000);
+          return date.toLocaleDateString("en-US", { weekday: "short" });
+        });
+      case "1M":
+        return Array.from({ length: 30 }, (_, i) => {
+          const date = new Date(now.getTime() - (29 - i) * 24 * 60 * 60 * 1000);
+          return date.getDate().toString();
+        });
+      case "3M":
+        return Array.from({ length: 3 }, (_, i) => {
+          const monthDate = new Date(now.getFullYear(), now.getMonth() - (2 - i), 1);
+          return monthDate.toLocaleDateString("en-US", { month: "short" });
+        });
+      case "6M":
+        return Array.from({ length: 6 }, (_, i) => {
+          const monthDate = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+          return monthDate.toLocaleDateString("en-US", { month: "short" });
+        });
+      case "1Y":
+        return Array.from({ length: 12 }, (_, i) => {
+          const monthDate = new Date(now.getFullYear(), now.getMonth() - (11 - i), 1);
+          return monthDate.toLocaleDateString("en-US", { month: "short" });
+        });
+      case "ALL":
+        return Array.from({ length: 7 }, (_, i) => {
+          const monthDate = new Date(now.getFullYear(), now.getMonth() - (6 - i), 1);
+          return monthDate.toLocaleDateString("en-US", { month: "short" });
+        });
+      default:
+        return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    }
+  };
+
+  const getDetailedLabels = (period: string, dataSource: "users" | "newUsers" = "users") => {
+    const labels = dataSource === "users" ? totalUsersLabels : newUsersLabels;
+    const lengths: Record<string, number> = {
+      "1D": 24,
+      "1W": 7,
+      "1M": 30,
+      "3M": 3,
+      "6M": 6,
+      "1Y": 12,
+      ALL: 7,
+    };
+    let expectedLength = lengths[period] || 7;
+
+    if (period === "ALL" && dataSource === "users") {
+      const { labels: allLabels, expectedLength: allExpected } = buildAllLabelsForUsers();
+      expectedLength = allExpected || expectedLength;
+      if (labels && labels.length === allLabels.length) {
+        return allLabels;
+      }
+      return allLabels;
+    }
+
+    if (period === "ALL" && dataSource !== "users") {
+      return [];
+    }
+
+    if (labels && labels.length > 0 && labels.length === expectedLength) {
+      if (period === "1D") {
+        return labels.map((label) => {
+          const hour = parseInt(label.replace("h", ""), 10);
+          if (hour === 0) return "12am";
+          if (hour < 12) return `${hour}am`;
+          if (hour === 12) return "12pm";
+          return `${hour - 12}pm`;
+        });
+      }
+      if (period === "1Y" || period === "3M" || period === "6M") {
+        return labels.map((label) => {
+          const monthNames = [
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
+          ];
+          const shortNames = [
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+          ];
+          const index = shortNames.indexOf(label);
+          if (index !== -1) return monthNames[index];
+          return label;
+        });
+      }
+      return labels;
+    }
+
+    const now = new Date();
+    switch (period) {
+      case "1D":
+        return Array.from({ length: 24 }, (_, i) => {
+          const hour = new Date();
+          hour.setHours(i, 0, 0, 0);
+          return hour.toLocaleTimeString("en-US", { hour: "numeric", hour12: true });
+        });
+      case "1W":
+        return Array.from({ length: 7 }, (_, i) => {
+          const date = new Date(now.getTime() - (6 - i) * 24 * 60 * 60 * 1000);
+          return date.toLocaleDateString("en-US", { weekday: "long" });
+        });
+      case "1M":
+        return Array.from({ length: 30 }, (_, i) => {
+          const date = new Date(now.getTime() - (29 - i) * 24 * 60 * 60 * 1000);
+          const monthName = date.toLocaleDateString("en-US", { month: "short" });
+          const dayNum = date.getDate();
+          return `${monthName} ${dayNum}`;
+        });
+      case "3M":
+        return Array.from({ length: 3 }, (_, i) => {
+          const monthDate = new Date(now.getFullYear(), now.getMonth() - (2 - i), 1);
+          return monthDate.toLocaleDateString("en-US", { month: "long" });
+        });
+      case "6M":
+        return Array.from({ length: 6 }, (_, i) => {
+          const monthDate = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+          return monthDate.toLocaleDateString("en-US", { month: "long" });
+        });
+      case "1Y":
+        // Last 12 months starting from current month
+        return Array.from({ length: 12 }, (_, i) => {
+          const monthDate = new Date(now.getFullYear(), now.getMonth() - (11 - i), 1);
+          return monthDate.toLocaleDateString("en-US", { month: "long" });
+        });
+      case "ALL":
+        return Array.from({ length: 7 }, (_, i) => {
+          const monthDate = new Date(now.getFullYear(), now.getMonth() - (6 - i), 1);
+          return monthDate.toLocaleDateString("en-US", { month: "long" });
+        });
+      default:
+        return ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    }
+  };
+
+  // Generate chart data points based on selected period
+  const getChartData = (
+    period: string,
+    dataSource: "users" | "newUsers" | "activity" = "users",
+  ) => {
+    const data = dataSource === "users" ? totalUsersData : newUsersData;
+    const lengths: Record<string, number> = {
+      "1D": 24,
+      "1W": 7,
+      "1M": 30,
+      "3M": 3,
+      "6M": 6,
+      "1Y": 12,
+      ALL: 7,
+    };
+    let expectedLength = lengths[period] || 7;
+
+    if (period === "ALL" && dataSource === "users") {
+      const { expectedLength: allExpected } = buildAllLabelsForUsers();
+      expectedLength = allExpected || expectedLength;
+    }
+
+    if (period === "ALL" && dataSource === "activity") {
+      const { expectedLength: allExpected } = buildAllLabelsForUsers();
+      expectedLength = allExpected || expectedLength;
+    }
+
+    if (!data || data.length === 0) {
+      return Array(expectedLength).fill(0);
+    }
+
+    const paddedData = [...data];
+    while (paddedData.length < expectedLength) {
+      paddedData.push(0);
+    }
+    const trimmedData = paddedData.slice(0, expectedLength);
+
+    const maxValue = Math.max(...trimmedData, 1);
+    return trimmedData.map((val) => (val / maxValue) * 100);
+  };
+
+  const renderOverview = () => {
+    const resolvedActivityLabels =
+      activityPeriod === "ALL"
+        ? getChartLabels("ALL", "activity")
+        : activityLabels.length > 0
+          ? activityLabels
+          : getChartLabels(activityPeriod, "activity");
+    const activityBuckets = resolvedActivityLabels.map((_, index) =>
+      ACTIVITY_STREAMS.reduce((sum, stream) => sum + (activitySeries[stream.id]?.[index] ?? 0), 0),
+    );
+    const maxActivityValue = Math.max(...activityBuckets, 1);
+
+    return (
+      <div className="flex flex-col flex-1 gap-6 px-0 min-h-0 pb-6">
+        {/* <div className="px-6 pt-8">
+        <h1 className="text-3xl text-white font-light mb-2">Welcome Back</h1>
+        <p className="text-gray-400 text-sm">
+          {new Date().toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            weekday: 'short',
+          })}
+        </p>
+      </div> */}
+        <div className="px-3 md:px-6 overflow-hidden shrink-0">
+          <div
+            className={`flex flex-col md:flex-row md:flex-wrap items-start md:items-center justify-between gap-3 md:gap-8 py-4 px-3 md:px-6 bg-gradient-to-b from-white/[4%] to-white/[2.5%]  border border-white/10 rounded-none overflow-x-auto relative`}
+          >
+            {/* Top-left corner */}
+            <div className="absolute top-0 left-0 w-[12px] h-[0.5px] bg-white/20" />
+            <div className="absolute top-0 left-0 w-[0.5px] h-[12px] bg-white/20" />
+            {/* Top-right corner */}
+            <div className="absolute top-0 right-0 w-[12px] h-[0.5px] bg-white/20" />
+            <div className="absolute top-0 right-0 w-[0.5px] h-[12px] bg-white/20" />
+            {/* Bottom-left corner */}
+            <div className="absolute bottom-0 left-0 w-[12px] h-[0.5px] bg-white/20" />
+            <div className="absolute bottom-0 left-0 w-[0.5px] h-[12px] bg-white/20" />
+            {/* Bottom-right corner */}
+            <div className="absolute bottom-0 right-0 w-[12px] h-[0.5px] bg-white/20" />
+            <div className="absolute bottom-0 right-0 w-[0.5px] h-[12px] bg-white/20" />
+
+            <div className="flex items-center gap-2 md:gap-3 min-w-fit">
+              <div className="w-8 h-8 md:w-10 md:h-10 rounded-none bg-white/5 border border-dashed border-white/10 flex items-center justify-center flex-shrink-0">
+                <Users className="w-4 h-4 md:w-5 md:h-5 text-white" />
+              </div>
+              <div className="flex items-center gap-1.5 md:gap-2">
+                <span className="text-gray-400 text-xs md:text-sm uppercase tracking-wide">
+                  Users
+                </span>
+                <span className="text-white text-base md:text-lg font-medium">
+                  {loading ? "..." : formatCompactNumber(counts.users)}
+                </span>
+                <div
+                  className={`flex items-center gap-1 ${usersDailyPercentage >= 0 ? "text-green-500" : "text-red-500"}`}
+                >
+                  <svg
+                    className={`w-2.5 h-2.5 md:w-3 md:h-3 ${usersDailyPercentage < 0 ? "rotate-180" : ""}`}
+                    viewBox="0 0 12 12"
+                    fill="currentColor"
+                  >
+                    <path d="M6 0 L12 12 L0 12 Z" />
+                  </svg>
+                  <span className="text-xs md:text-sm font-medium">
+                    {Math.abs(usersDailyPercentage).toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Divider */}
+            <div className="hidden md:block h-8 w-[1px] bg-white/10" />
+
+            {/* Total Organizations Stat */}
+            <div className="flex items-center gap-2 md:gap-3 min-w-fit">
+              <div className="w-8 h-8 md:w-10 md:h-10 rounded-none bg-white/5 border border-dashed border-white/10 flex items-center justify-center flex-shrink-0">
+                <Building2 className="w-4 h-4 md:w-5 md:h-5 text-white" />
+              </div>
+              <div className="flex items-center gap-1.5 md:gap-2">
+                <span className="text-gray-400 text-xs md:text-sm uppercase tracking-wide">
+                  Orgs
+                </span>
+                <span className="text-white text-base md:text-lg font-medium">
+                  {loading ? "..." : formatCompactNumber(counts.organizations)}
+                </span>
+                <div
+                  className={`flex items-center gap-1 ${organizationsDailyPercentage >= 0 ? "text-green-500" : "text-red-500"}`}
+                >
+                  <svg
+                    className={`w-2.5 h-2.5 md:w-3 md:h-3 ${organizationsDailyPercentage < 0 ? "rotate-180" : ""}`}
+                    viewBox="0 0 12 12"
+                    fill="currentColor"
+                  >
+                    <path d="M6 0 L12 12 L0 12 Z" />
+                  </svg>
+                  <span className="text-xs md:text-sm font-medium">
+                    {Math.abs(organizationsDailyPercentage).toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="hidden md:block h-8 w-[1px] bg-white/10" />
+
+            <div className="flex items-center gap-2 md:gap-3 min-w-fit">
+              <div className="w-8 h-8 md:w-10 md:h-10 rounded-none bg-white/5 border border-dashed border-white/10 flex items-center justify-center flex-shrink-0">
+                <Zap className="w-4 h-4 md:w-5 md:h-5 text-white" />
+              </div>
+              <div className="flex items-center gap-1.5 md:gap-2">
+                <span className="text-gray-400 text-xs md:text-sm uppercase tracking-wide">
+                  Sessions
+                </span>
+                <span className="text-white text-base md:text-lg font-medium">
+                  {loading ? "..." : formatCompactNumber(counts.sessions)}
+                </span>
+                <div
+                  className={`flex items-center gap-1 ${sessionsDailyPercentage >= 0 ? "text-green-500" : "text-red-500"}`}
+                >
+                  <svg
+                    className={`w-2.5 h-2.5 md:w-3 md:h-3 ${sessionsDailyPercentage < 0 ? "rotate-180" : ""}`}
+                    viewBox="0 0 12 12"
+                    fill="currentColor"
+                  >
+                    <path d="M6 0 L12 12 L0 12 Z" />
+                  </svg>
+                  <span className="text-xs md:text-sm font-medium">
+                    {Math.abs(sessionsDailyPercentage).toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Divider */}
+            <div className="hidden md:block h-8 w-[1px] bg-white/10" />
+
+            {/* Activity Hits Stat */}
+            <div className="flex items-center gap-2 md:gap-3 min-w-fit">
+              <div className="w-8 h-8 md:w-10 md:h-10 rounded-none bg-white/5 border border-dashed border-white/10 flex items-center justify-center flex-shrink-0">
+                <BarChart3 className="w-4 h-4 md:w-5 md:h-5 text-white" />
+              </div>
+              <div className="flex items-center gap-1.5 md:gap-2">
+                <span className="text-gray-400 text-xs md:text-sm uppercase tracking-wide">
+                  Hits
+                </span>
+                <span className="text-white text-base md:text-lg font-medium">
+                  {loading ? "..." : formatCompactNumber(activityHitsDailyTotal ?? 0)}
+                </span>
+                <div
+                  className={`flex items-center gap-1 ${activityHitsDailyPercentage >= 0 ? "text-green-500" : "text-red-500"}`}
+                >
+                  <svg
+                    className={`w-2.5 h-2.5 md:w-3 md:h-3 ${activityHitsDailyPercentage < 0 ? "rotate-180" : ""}`}
+                    viewBox="0 0 12 12"
+                    fill="currentColor"
+                  >
+                    <path d="M6 0 L12 12 L0 12 Z" />
+                  </svg>
+                  <span className="text-xs md:text-sm font-medium">
+                    {Math.abs(activityHitsDailyPercentage).toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Divider */}
+            <div className="hidden md:block h-8 w-[1px] bg-white/10" />
+
+            {/* New Users Daily */}
+            <div className="flex items-center gap-2 md:gap-3 min-w-fit">
+              <div className="w-8 h-8 md:w-10 md:h-10 rounded-none bg-white/5 border border-dashed border-white/10 flex items-center justify-center flex-shrink-0">
+                <Users className="w-4 h-4 md:w-5 md:h-5 text-white" />
+              </div>
+              <div className="flex items-center gap-1.5 md:gap-2">
+                <span className="text-gray-400 text-xs md:text-sm uppercase tracking-wide">
+                  New
+                </span>
+                <span className="text-white text-base md:text-lg font-medium">
+                  {loading ? "..." : formatCompactNumber(newUsersDaily ?? 0)}
+                </span>
+                <div
+                  className={`flex items-center gap-1 ${newUsersDailyPercentage >= 0 ? "text-green-500" : "text-red-500"}`}
+                >
+                  <svg
+                    className={`w-2.5 h-2.5 md:w-3 md:h-3 ${newUsersDailyPercentage < 0 ? "rotate-180" : ""}`}
+                    viewBox="0 0 12 12"
+                    fill="currentColor"
+                  >
+                    <path d="M6 0 L12 12 L0 12 Z" />
+                  </svg>
+                  <span className="text-xs md:text-sm font-medium">
+                    {Math.abs(newUsersDailyPercentage).toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <DashboardLayoutGrid
+          cards={{
+            "total-users": (
+
+                <div className="bg-gradient-to-b from-white/[4%] to-white/[2.5%] border h-full border-white/10 rounded-none p-3 md:p-6 relative flex flex-col overflow-hidden">
+                  {/* Top-left corner */}
+                  <div className="absolute top-0 left-0 w-[12px] h-[0.5px] bg-white/20" />
+                  <div className="absolute top-0 left-0 w-[0.5px] h-[12px] bg-white/20" />
+                  {/* Top-right corner */}
+                  <div className="absolute top-0 right-0 w-[12px] h-[0.5px] bg-white/20" />
+                  <div className="absolute top-0 right-0 w-[0.5px] h-[12px] bg-white/20" />
+                  {/* Bottom-left corner */}
+                  <div className="absolute bottom-0 left-0 w-[12px] h-[0.5px] bg-white/20" />
+                  <div className="absolute bottom-0 left-0 w-[0.5px] h-[12px] bg-white/20" />
+                  {/* Bottom-right corner */}
+                  <div className="absolute bottom-0 right-0 w-[12px] h-[0.5px] bg-white/20" />
+                  <div className="absolute bottom-0 right-0 w-[0.5px] h-[12px] bg-white/20" />
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm text-white uppercase font-light">TOTAL USER</h3>
+                    <div className="flex items-center space-x-1 overflow-x-auto">
+                      {["1D", "1W", "6M", "1Y", "ALL"].map((period) => (
+                        <button
+                          key={period}
+                          onClick={() => setSelectedUserPeriod(period)}
+                          className={`px-2 py-1 text-xs font-light transition-colors whitespace-nowrap ${
+                            selectedUserPeriod === period
+                              ? "bg-white/20 text-white border border-white/30"
+                              : "text-gray-500 hover:text-white"
+                          }`}
+                        >
+                          {period}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-end mb-4">
+                    {(() => {
+                      const chartData = getChartData(selectedUserPeriod, "users");
+                      const rawData =
+                        totalUsersData.length > 0
+                          ? totalUsersData.slice(0, chartData.length)
+                          : Array(chartData.length).fill(0);
+                      const periodTotal = rawData.reduce((sum, val) => sum + val, 0);
+
+                      return (
+                        <>
+                          <p className="text-4xl text-white font-light">
+                            {loading ? "..." : formatCompactNumber(periodTotal)}
+                          </p>
+                          <div className="flex items-center gap-1 px-2 py-1">
+                            <svg
+                              className={`w-3 h-3 ${totalUsersPercentage >= 0 ? "text-green-500" : "text-red-500 rotate-180"}`}
+                              viewBox="0 0 12 12"
+                              fill="currentColor"
+                            >
+                              <path d="M6 0 L12 12 L0 12 Z" />
+                            </svg>
+                            <span
+                              className={`text-xs font-medium ${totalUsersPercentage >= 0 ? "text-green-500" : "text-red-500"}`}
+                            >
+                              {Math.abs(totalUsersPercentage).toFixed(1)}%
+                            </span>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                  <div className="space-y-2 relative">
+                    {(() => {
+                      const chartData = getChartData(selectedUserPeriod, "users");
+                      const rawData =
+                        totalUsersData.length > 0
+                          ? totalUsersData.slice(0, chartData.length)
+                          : Array(chartData.length).fill(0);
+                      const maxValue = Math.max(...rawData, 1);
+                      const yAxisLabels = Array.from({ length: 6 }, (_, i) => {
+                        const value = (maxValue / 5) * (5 - i);
+                        return value;
+                      });
+
+                      return (
+                        <div className="flex gap-2">
+                          {/* Y-axis labels */}
+                          <div className="flex flex-col justify-between h-48 text-xs text-gray-500 font-mono pt-0.5 pb-0.5">
+                            {yAxisLabels.map((value, i) => (
+                              <span key={i} className={`leading-none ${totalUsersAxisTextClass}`}>
+                                {formatCompactNumber(Math.round(value))}
+                              </span>
+                            ))}
+                          </div>
+
+                          {/* Chart area */}
+                          <div className="flex-1 h-48 relative">
+                            {/* Horizontal grid lines */}
+                            <div className="absolute inset-0 flex flex-col justify-between z-0">
+                              {[0, 1, 2, 3, 4, 5].map((i) => (
+                                <div
+                                  key={i}
+                                  className={`h-px w-full ${totalUsersGridLineClass}`}
+                                  style={{ opacity: 0.3 }}
+                                />
+                              ))}
+                            </div>
+                            <svg
+                              className="w-full h-full absolute inset-0"
+                              viewBox="0 0 100 100"
+                              preserveAspectRatio="none"
+                            >
+                              <defs>
+                                <linearGradient
+                                  id="usersBarGradient"
+                                  x1="0%"
+                                  y1="0%"
+                                  x2="0%"
+                                  y2="100%"
+                                >
+                                  <stop
+                                    offset="0%"
+                                    style={{
+                                      stopColor: totalUsersBarGradientStops.top,
+                                      stopOpacity: 1,
+                                    }}
+                                  />
+                                  <stop
+                                    offset="100%"
+                                    style={{
+                                      stopColor: totalUsersBarGradientStops.bottom,
+                                      stopOpacity: 1,
+                                    }}
+                                  />
+                                </linearGradient>
+                              </defs>
+                            </svg>
+                            <div className="h-48 flex items-end justify-between space-x-1 relative z-10">
+                              {chartData.map((height, i) => {
+                                const isHovered = hoveredUsersAreaIndex === i;
+
+                                return (
+                                  <div
+                                    key={i}
+                                    className="flex-1 transition-all duration-200 ease-out relative cursor-pointer group"
+                                    style={{
+                                      height: `${height}%`,
+                                      background: "url(#usersBarGradient)",
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      const rect = e.currentTarget.getBoundingClientRect();
+                                      const x = rect.left + rect.width / 2;
+                                      const y = rect.top;
+                                      const tooltipWidth = 150;
+                                      const tooltipHeight = 60;
+                                      const constrainedX = Math.max(
+                                        tooltipWidth / 2,
+                                        Math.min(window.innerWidth - tooltipWidth / 2, x),
+                                      );
+                                      const constrainedY = Math.max(
+                                        tooltipHeight + 10,
+                                        Math.min(window.innerHeight - 10, y),
+                                      );
+                                      setHoveredUsersAreaIndex(i);
+                                      setHoveredUsersAreaPosition({
+                                        x: constrainedX,
+                                        y: constrainedY,
+                                      });
+                                    }}
+                                    onMouseLeave={() => {
+                                      setHoveredUsersAreaIndex(null);
+                                      setHoveredUsersAreaPosition(null);
+                                    }}
+                                  >
+                                    <div
+                                      className="w-full h-full"
+                                      style={{
+                                        background: totalUsersBarGradientStops.fill,
+                                        opacity: isHovered ? 1 : 0.8,
+                                      }}
+                                    />
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {/* Tooltip */}
+                            {hoveredUsersAreaIndex !== null && hoveredUsersAreaPosition && (
+                              <div
+                                className="fixed z-50 pointer-events-none transition-all duration-200 ease-out animate-in fade-in"
+                                style={{
+                                  left: `${hoveredUsersAreaPosition.x}px`,
+                                  top: `${hoveredUsersAreaPosition.y}px`,
+                                  transform: "translate(-50%, -100%)",
+                                  maxWidth: "calc(100vw - 20px)",
+                                }}
+                              >
+                                <div
+                                  className={`${chartTooltipClass} rounded-sm px-3 py-2 whitespace-nowrap`}
+                                >
+                                  <div
+                                    className={`mb-1 text-xs font-mono uppercase ${chartTooltipLabelClass}`}
+                                  >
+                                    {
+                                      getDetailedLabels(selectedUserPeriod, "users")[
+                                        hoveredUsersAreaIndex
+                                      ]
+                                    }
+                                  </div>
+                                  <div
+                                    className={`text-sm font-sans font-medium ${chartTooltipValueClass}`}
+                                  >
+                                    {totalUsersData[hoveredUsersAreaIndex] !== undefined
+                                      ? totalUsersData[hoveredUsersAreaIndex].toLocaleString()
+                                      : "0"}{" "}
+                                    <span className={`text-xs font-mono ${chartTooltipMetaClass}`}>
+                                      users
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    <div
+                      className={`flex justify-between font-mono ${selectedUserPeriod === "1M" ? "text-[10px]" : "text-xs"} ${totalUsersAxisTextClass}`}
+                    >
+                      {getChartLabels(selectedUserPeriod, "users").map((label, i) => (
+                        <span key={i} className="flex-1 text-center truncate">
+                          {label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+            ),
+            "activity": (
+
+                <div className="bg-gradient-to-b from-white/[4%] to-white/[2.5%] border border-white/10 rounded-none p-3 md:p-6 relative h-full min-h-0 flex flex-col overflow-hidden">
+                  <div className="absolute top-0 left-0 w-[12px] h-[0.5px] bg-white/20" />
+                  <div className="absolute top-0 left-0 w-[0.5px] h-[12px] bg-white/20" />
+                  <div className="absolute top-0 right-0 w-[12px] h-[0.5px] bg-white/20" />
+                  <div className="absolute top-0 right-0 w-[0.5px] h-[12px] bg-white/20" />
+                  <div className="absolute bottom-0 left-0 w-[12px] h-[0.5px] bg-white/20" />
+                  <div className="absolute bottom-0 left-0 w-[0.5px] h-[12px] bg-white/20" />
+                  <div className="absolute bottom-0 right-0 w-[12px] h-[0.5px] bg-white/20" />
+                  <div className="absolute bottom-0 right-0 w-[0.5px] h-[12px] bg-white/20" />
+                  <div className="flex items-center justify-between mb-4 shrink-0">
+                    <div>
+                      <h3 className="text-sm text-white uppercase font-light">Activity Hits</h3>
+                      <p className="text-4xl text-white font-light mt-1">
+                        {activityLoading ? "..." : formatFullNumber(activityGrandTotal)}
+                      </p>
+                      <p className="text-xs text-gray-400">Tracked events in selected period</p>
+                    </div>
+                    <div className="flex items-center space-x-1 overflow-x-auto">
+                      {["1D", "1W", "3M", "6M", "1Y", "ALL"].map((period) => (
+                        <button
+                          key={period}
+                          onClick={() => setActivityPeriod(period)}
+                          className={`px-2 py-1 text-xs font-light transition-colors whitespace-nowrap ${
+                            activityPeriod === period
+                              ? "bg-white/20 text-white border border-white/30"
+                              : "text-gray-500 hover:text-white"
+                          }`}
+                        >
+                          {period}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="relative flex flex-1 min-h-0 flex-col gap-2">
+                    <div className="relative flex-1 min-h-0">
+                      <div className="absolute inset-0 flex items-end gap-1">
+                        {resolvedActivityLabels.map((label, index) => {
+                          const bucketTotal = activityBuckets[index] || 0;
+                          const barHeightFraction =
+                            maxActivityValue === 0
+                              ? 0
+                              : Math.min(1, bucketTotal / maxActivityValue);
+                          return (
+                            <div
+                              key={`${label}-${index}`}
+                              className="flex-1 flex flex-col justify-end gap-[1px] h-full cursor-pointer"
+                              onMouseEnter={(event) =>
+                                handleActivityHover(event, index, barHeightFraction)
+                              }
+                              onMouseLeave={() => {
+                                setHoveredAreaIndex(null);
+                                setHoveredAreaPosition(null);
+                              }}
+                            >
+                              {activityStreams.map((stream) => {
+                                const value = activitySeries[stream.id]?.[index] ?? 0;
+                                const heightPercent =
+                                  bucketTotal === 0 || maxActivityValue === 0
+                                    ? 0
+                                    : Math.max((value / maxActivityValue) * 100, value > 0 ? 4 : 0);
+                                return (
+                                  <div
+                                    key={`${stream.id}-${index}`}
+                                    className={`w-full ${stream.barClass}`}
+                                    style={{ height: `${heightPercent}%` }}
+                                  />
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {activityLoading && (
+                        <div className={activityLoadingOverlayClass}>Loading activity...</div>
+                      )}
+                    </div>
+                    {hoveredAreaIndex !== null && hoveredAreaPosition && (
+                      <div
+                        className="fixed z-50 pointer-events-none transition-all duration-200 ease-out animate-in fade-in"
+                        style={{
+                          left: `${hoveredAreaPosition.x}px`,
+                          top: `${hoveredAreaPosition.y}px`,
+                          transform: "translate(-50%, -100%)",
+                          maxWidth: "calc(100vw - 20px)",
+                        }}
+                      >
+                        <div className={`${chartTooltipClass} min-w-[180px] rounded-sm px-3 py-2`}>
+                          <div
+                            className={`mb-2 text-xs font-mono uppercase ${chartTooltipLabelClass}`}
+                          >
+                            {(() => {
+                              const rawLabel =
+                                resolvedActivityLabels[hoveredAreaIndex] ||
+                                `Bucket ${hoveredAreaIndex + 1}`;
+                              if (activityPeriod === "1D" && rawLabel.endsWith("h")) {
+                                const hour = parseInt(rawLabel.replace("h", ""), 10);
+                                if (hour === 0) return "12:00 AM";
+                                if (hour < 12) return `${hour}:00 AM`;
+                                if (hour === 12) return "12:00 PM";
+                                return `${hour - 12}:00 PM`;
+                              }
+                              return rawLabel;
+                            })()}
+                          </div>
+                          <div className="space-y-1">
+                            {activityStreams.map((stream) => (
+                              <div key={stream.id}>
+                                <div className="flex items-center justify-between text-sm">
+                                  <div
+                                    className={`flex items-center gap-2 ${activityTooltipSeriesLabelClass}`}
+                                  >
+                                    <span className={`w-2 h-2 rounded-sm ${stream.dotClass}`} />
+                                    {stream.label}
+                                  </div>
+                                  <span className={`font-medium ${chartTooltipValueClass}`}>
+                                    {activitySeries[stream.id]?.[hoveredAreaIndex] ?? 0}
+                                  </span>
+                                </div>
+                                {stream.id === "logins" &&
+                                  loginsUniqueUsers[hoveredAreaIndex] !== undefined && (
+                                    <div className="flex items-center justify-between text-[11px] ml-4 mt-0.5">
+                                      <span className={activityTooltipUniqueLabelClass}>
+                                        Unique users
+                                      </span>
+                                      <span className={`font-medium ${chartTooltipMetaClass}`}>
+                                        {loginsUniqueUsers[hoveredAreaIndex]}
+                                      </span>
+                                    </div>
+                                  )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    <div
+                      className={`shrink-0 flex justify-between font-mono ${activityPeriod === "1M" || activityPeriod === "1D" ? "text-[10px]" : "text-xs"} ${totalUsersAxisTextClass}`}
+                    >
+                      {resolvedActivityLabels.map((label, i) => {
+                        // For daily (1D), only show every 4th label with AM/PM format
+                        if (activityPeriod === "1D") {
+                          if (i % 4 !== 0) {
+                            return (
+                              <span key={i} className="flex-1 text-center truncate">
+                                &nbsp;
+                              </span>
+                            );
+                          }
+                          const hour = parseInt(label.replace("h", ""), 10);
+                          let formatted = "";
+                          if (hour === 0) formatted = "12am";
+                          else if (hour < 12) formatted = `${hour}am`;
+                          else if (hour === 12) formatted = "12pm";
+                          else formatted = `${hour - 12}pm`;
+                          return (
+                            <span key={i} className="flex-1 text-center truncate">
+                              {formatted}
+                            </span>
+                          );
+                        }
+                        return (
+                          <span key={i} className="flex-1 text-center truncate">
+                            {label}
+                          </span>
+                        );
+                      })}
+                    </div>
+                    <div className="shrink-0 grid grid-cols-2 lg:grid-cols-5 gap-3 mt-4 pt-4 border-t border-white/10">
+                      {activityStreams.map((stream) => (
+                        <div
+                          key={stream.id}
+                          className={`flex items-center justify-between text-xs ${activityLegendTextClass}`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded-sm ${stream.dotClass}`} />
+                            {stream.label}
+                          </div>
+                          <span className={`font-medium ${activityLegendValueClass}`}>
+                            {activityLoading
+                              ? "..."
+                              : formatFullNumber(activityTotals[stream.id] || 0)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+            ),
+            "active-users": (
+
+                  <div className="bg-gradient-to-b from-white/[4%] to-white/[2.5%] border border-white/10 rounded-none p-3 md:p-6 pb-2 relative flex-1 flex flex-col">
+                    {/* Top-left corner */}
+                    <div className="absolute top-0 left-0 w-[12px] h-[0.5px] bg-white/20" />
+                    <div className="absolute top-0 left-0 w-[0.5px] h-[12px] bg-white/20" />
+                    {/* Top-right corner */}
+                    <div className="absolute top-0 right-0 w-[12px] h-[0.5px] bg-white/20" />
+                    <div className="absolute top-0 right-0 w-[0.5px] h-[12px] bg-white/20" />
+                    {/* Bottom-left corner */}
+                    <div className="absolute bottom-0 left-0 w-[12px] h-[0.5px] bg-white/20" />
+                    <div className="absolute bottom-0 left-0 w-[0.5px] h-[12px] bg-white/20" />
+                    {/* Bottom-right corner */}
+                    <div className="absolute bottom-0 right-0 w-[12px] h-[0.5px] bg-white/20" />
+                    <div className="absolute bottom-0 right-0 w-[0.5px] h-[12px] bg-white/20" />
+                    <div className="flex items-center justify-between mb-2 relative -mt-2 pb-1">
+                      <div className="relative">
+                        <button
+                          onClick={() => setShowActiveUsersDropdown(!showActiveUsersDropdown)}
+                          className="text-xs h-full font-mono uppercase text-gray-400 flex items-center space-x-1 hover:text-white transition-colors"
+                        >
+                          <ChevronDown className="w-3 h-3" />
+                          <span>{activeUsersPeriod}</span>
+                        </button>
+                        {showActiveUsersDropdown && (
+                          <div className="absolute top-6 left-0 w-[150px]  z-10 bg-black border border-white/10 rounded-none shadow-lg">
+                            {periodOptions.map((period) => (
+                              <button
+                                key={period}
+                                onClick={() => {
+                                  setActiveUsersPeriod(period);
+                                  setShowActiveUsersDropdown(false);
+                                }}
+                                className="block border-b border-dashed border-white/5 w-full text-left px-4 py-2 text-xs text-white hover:bg-white/10 transition-colors whitespace-nowrap"
+                              >
+                                {period}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {activeUsersPeriod === "Custom" && (
+                        <div className="h-0 flex items-center gap-2">
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="outline"
+                                className="h-6 px-2 text-xs font-mono uppercase text-gray-400 hover:text-white bg-transparent border-white/10 hover:bg-white/5"
+                              >
+                                <CalendarIcon className="mr-1 h-3 w-3" />
+                                {activeUsersDateFrom
+                                  ? format(activeUsersDateFrom, "MMM dd yyyy")
+                                  : "From"}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0 bg-black border-white/10">
+                              <Calendar
+                                mode="single"
+                                selected={activeUsersDateFrom}
+                                onSelect={setActiveUsersDateFrom}
+                                initialFocus
+                                className="rounded-none"
+                              />
+                            </PopoverContent>
+                          </Popover>
+
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="outline"
+                                className="h-6 px-2 text-xs font-mono uppercase text-gray-400 hover:text-white bg-transparent border-white/10 hover:bg-white/5"
+                              >
+                                <CalendarIcon className="mr-1 h-3 w-3" />
+                                {activeUsersDateTo
+                                  ? format(activeUsersDateTo, "MMM dd yyyy")
+                                  : "To"}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0 bg-black border-white/10">
+                              <Calendar
+                                mode="single"
+                                selected={activeUsersDateTo}
+                                onSelect={setActiveUsersDateTo}
+                                initialFocus
+                                disabled={(date) =>
+                                  activeUsersDateFrom ? date < activeUsersDateFrom : false
+                                }
+                                className="rounded-none"
+                              />
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                      )}
+                    </div>
+                    <hr className="mb-2 -mx-10 border-white/10" />
+                    <h4 className="text-md text-white/80 uppercase font-mono font-light mb-1">
+                      Active Users
+                    </h4>
+                    <p className="text-xs text-gray-400 mb-3">
+                      Users with active session in the time frame
+                    </p>
+                    <div className="flex pt-4 justify-between items-end">
+                      <p className="text-3xl text-white font-light">
+                        {formatFullNumber(activeUsersDaily)}
+                      </p>
+                      <div className="mt-2 mb-1 flex items-center gap-2">
+                        <div className="flex items-center -mr-5 gap-1 px-2 py-1 border-white/5 rounded-none">
+                          <svg
+                            className={`w-3 h-3 ${activeUsersPercentage >= 0 ? "text-green-500" : "text-red-500 rotate-180"}`}
+                            viewBox="0 0 12 12"
+                            fill="currentColor"
+                          >
+                            <path d="M6 0 L12 12 L0 12 Z" />
+                          </svg>
+                          <span
+                            className={`text-xs font-medium ${activeUsersPercentage >= 0 ? "text-green-500" : "text-red-500"}`}
+                          >
+                            {Math.abs(activeUsersPercentage).toFixed(1)}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+            ),
+            "new-users": (
+
+                  <div className="bg-gradient-to-b from-white/[4%] to-white/[2.5%] border border-white/10 rounded-none p-3 md:p-6 pb-2 relative flex-1 flex flex-col">
+                    {/* Top-left corner */}
+                    <div className="absolute top-0 left-0 w-[12px] h-[0.5px] bg-white/20" />
+                    <div className="absolute top-0 left-0 w-[0.5px] h-[12px] bg-white/20" />
+                    {/* Top-right corner */}
+                    <div className="absolute top-0 right-0 w-[12px] h-[0.5px] bg-white/20" />
+                    <div className="absolute top-0 right-0 w-[0.5px] h-[12px] bg-white/20" />
+                    {/* Bottom-left corner */}
+                    <div className="absolute bottom-0 left-0 w-[12px] h-[0.5px] bg-white/20" />
+                    <div className="absolute bottom-0 left-0 w-[0.5px] h-[12px] bg-white/20" />
+                    {/* Bottom-right corner */}
+                    <div className="absolute bottom-0 right-0 w-[12px] h-[0.5px] bg-white/20" />
+                    <div className="absolute bottom-0 right-0 w-[0.5px] h-[12px] bg-white/20" />
+                    <div className="flex items-center justify-between mb-2 relative -mt-2 pb-1">
+                      <div className="relative">
+                        <button
+                          onClick={() => setShowNewUsersDropdown(!showNewUsersDropdown)}
+                          className="text-xs h-full font-mono uppercase text-gray-400 flex items-center space-x-1 hover:text-white transition-colors"
+                        >
+                          <ChevronDown className="w-3 h-3" />
+                          <span>{newUsersPeriod}</span>
+                        </button>
+                        {showNewUsersDropdown && (
+                          <div className="absolute top-6 left-0 w-[150px]  z-10 bg-black border border-white/10 rounded-none shadow-lg">
+                            {periodOptions.map((period) => (
+                              <button
+                                key={period}
+                                onClick={() => {
+                                  setNewUsersPeriod(period);
+                                  setShowNewUsersDropdown(false);
+                                }}
+                                className="block border-b border-dashed border-white/5 w-full text-left px-4 py-2 text-xs text-white hover:bg-white/10 transition-colors whitespace-nowrap"
+                              >
+                                {period}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {newUsersPeriod === "Custom" && (
+                        <div className="h-0 flex items-center gap-2">
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="outline"
+                                className="h-6 px-2 text-xs font-mono uppercase text-gray-400 hover:text-white bg-transparent border-white/10 hover:bg-white/5"
+                              >
+                                <CalendarIcon className="mr-1 h-3 w-3" />
+                                {newUsersDateFrom
+                                  ? format(newUsersDateFrom, "MMM dd yyyy")
+                                  : "From"}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0 bg-black border-white/10">
+                              <Calendar
+                                mode="single"
+                                selected={newUsersDateFrom}
+                                onSelect={setNewUsersDateFrom}
+                                initialFocus
+                                className="rounded-none"
+                              />
+                            </PopoverContent>
+                          </Popover>
+
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="outline"
+                                className="h-6 px-2 text-xs font-mono uppercase text-gray-400 hover:text-white bg-transparent border-white/10 hover:bg-white/5"
+                              >
+                                <CalendarIcon className="mr-1 h-3 w-3" />
+                                {newUsersDateTo ? format(newUsersDateTo, "MMM dd yyyy") : "To"}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0 bg-black border-white/10">
+                              <Calendar
+                                mode="single"
+                                selected={newUsersDateTo}
+                                onSelect={setNewUsersDateTo}
+                                initialFocus
+                                disabled={(date) =>
+                                  newUsersDateFrom ? date < newUsersDateFrom : false
+                                }
+                                className="rounded-none"
+                              />
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                      )}
+                    </div>
+                    <hr className="mb-2 -mx-10 border-white/10" />
+                    <h4 className="text-md text-white/80 uppercase font-mono font-light mb-1">
+                      New Users
+                    </h4>
+                    <p className="text-xs text-gray-400 mb-3">
+                      Newly registered Users in the time frame
+                    </p>
+                    <div className="flex pt-4 justify-between items-end">
+                      <p className="text-3xl text-white font-light">
+                        {formatFullNumber(_newUsersCount)}
+                      </p>
+                      <div className="mt-2 mb-1 flex items-center gap-2">
+                        <div className="flex items-center -mr-5 gap-1 px-2 py-1 rounded-none">
+                          <svg
+                            className={`w-3 h-3 ${newUsersCountPercentage >= 0 ? "text-green-500" : "text-red-500 rotate-180"}`}
+                            viewBox="0 0 12 12"
+                            fill="currentColor"
+                            style={
+                              newUsersCountPercentage < 0 ? { transform: "rotate(180deg)" } : {}
+                            }
+                          >
+                            <path d="M6 0 L12 12 L0 12 Z" />
+                          </svg>
+                          <span
+                            className={`text-xs font-medium ${newUsersCountPercentage >= 0 ? "text-green-500" : "text-red-500"}`}
+                          >
+                            {Math.abs(newUsersCountPercentage).toFixed(1)}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+            ),
+            "organizations": (
+
+                  <div className="bg-gradient-to-b from-white/[4%] to-white/[2.5%] border border-white/10 rounded-none p-3 md:p-6 pb-2 relative flex-1 flex flex-col">
+                    {/* Top-left corner */}
+                    <div className="absolute top-0 left-0 w-[12px] h-[0.5px] bg-white/20" />
+                    <div className="absolute top-0 left-0 w-[0.5px] h-[12px] bg-white/20" />
+                    {/* Top-right corner */}
+                    <div className="absolute top-0 right-0 w-[12px] h-[0.5px] bg-white/20" />
+                    <div className="absolute top-0 right-0 w-[0.5px] h-[12px] bg-white/20" />
+                    {/* Bottom-left corner */}
+                    <div className="absolute bottom-0 left-0 w-[12px] h-[0.5px] bg-white/20" />
+                    <div className="absolute bottom-0 left-0 w-[0.5px] h-[12px] bg-white/20" />
+                    {/* Bottom-right corner */}
+                    <div className="absolute bottom-0 right-0 w-[12px] h-[0.5px] bg-white/20" />
+                    <div className="absolute bottom-0 right-0 w-[0.5px] h-[12px] bg-white/20" />
+                    <div className="flex items-center justify-between mb-2 relative -mt-2 pb-1">
+                      <div className="relative">
+                        <button
+                          onClick={() => setShowOrganizationsDropdown(!showOrganizationsDropdown)}
+                          className="text-xs h-full font-mono uppercase text-gray-400 flex items-center space-x-1 hover:text-white transition-colors"
+                        >
+                          <ChevronDown className="w-3 h-3" />
+                          <span>{organizationsPeriod}</span>
+                        </button>
+                        {showOrganizationsDropdown && (
+                          <div className="absolute top-6 left-0 w-[150px]  z-10 bg-black border border-white/10 rounded-none shadow-lg">
+                            {periodOptions.map((period) => (
+                              <button
+                                key={period}
+                                onClick={() => {
+                                  setOrganizationsPeriod(period);
+                                  setShowOrganizationsDropdown(false);
+                                }}
+                                className="block border-b border-dashed border-white/5 w-full text-left px-4 py-2 text-xs text-white hover:bg-white/10 transition-colors whitespace-nowrap"
+                              >
+                                {period}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {organizationsPeriod === "Custom" && (
+                        <div className="h-0 flex items-center gap-2">
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="outline"
+                                className="h-6 px-2 text-xs font-mono uppercase text-gray-400 hover:text-white bg-transparent border-white/10 hover:bg-white/5"
+                              >
+                                <CalendarIcon className="mr-1 h-3 w-3" />
+                                {organizationsDateFrom
+                                  ? format(organizationsDateFrom, "MMM dd yyyy")
+                                  : "From"}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0 bg-black border-white/10">
+                              <Calendar
+                                mode="single"
+                                selected={organizationsDateFrom}
+                                onSelect={setOrganizationsDateFrom}
+                                initialFocus
+                                className="rounded-none"
+                              />
+                            </PopoverContent>
+                          </Popover>
+
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="outline"
+                                className="h-6 px-2 text-xs font-mono uppercase text-gray-400 hover:text-white bg-transparent border-white/10 hover:bg-white/5"
+                              >
+                                <CalendarIcon className="mr-1 h-3 w-3" />
+                                {organizationsDateTo
+                                  ? format(organizationsDateTo, "MMM dd yyyy")
+                                  : "To"}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0 bg-black border-white/10">
+                              <Calendar
+                                mode="single"
+                                selected={organizationsDateTo}
+                                onSelect={setOrganizationsDateTo}
+                                initialFocus
+                                disabled={(date) =>
+                                  organizationsDateFrom ? date < organizationsDateFrom : false
+                                }
+                                className="rounded-none"
+                              />
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                      )}
+                    </div>
+                    <hr className="mb-2 -mx-10 border-white/10" />
+                    <h4 className="text-md text-white/80 uppercase font-mono font-light mb-1">
+                      Organizations
+                    </h4>
+                    <p className="text-xs text-gray-400 mb-3">
+                      Total organizations in the time frame
+                    </p>
+                    <div className="flex pt-4 justify-between items-end">
+                      <p className="text-3xl text-white font-light">
+                        {organizationsLoading ? "..." : formatFullNumber(organizationsCount)}
+                      </p>
+                      <div className="mt-2 mb-1 flex items-center gap-2">
+                        <div className="flex items-center -mr-5 gap-1 px-2 py-1 rounded-none">
+                          <svg
+                            className={`w-3 h-3 ${organizationsPercentage >= 0 ? "text-green-500" : "text-red-500 rotate-180"}`}
+                            viewBox="0 0 12 12"
+                            fill="currentColor"
+                          >
+                            <path d="M6 0 L12 12 L0 12 Z" />
+                          </svg>
+                          <span
+                            className={`text-xs font-medium ${organizationsPercentage >= 0 ? "text-green-500" : "text-red-500"}`}
+                          >
+                            {Math.abs(organizationsPercentage).toFixed(1)}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+            ),
+            "teams": (
+
+                  <div className="bg-gradient-to-b from-white/[4%] to-white/[2.5%] border border-white/10 rounded-none p-3 md:p-6 pb-2 relative flex-1 flex flex-col">
+                    {/* Top-left corner */}
+                    <div className="absolute top-0 left-0 w-[12px] h-[0.5px] bg-white/20" />
+                    <div className="absolute top-0 left-0 w-[0.5px] h-[12px] bg-white/20" />
+                    {/* Top-right corner */}
+                    <div className="absolute top-0 right-0 w-[12px] h-[0.5px] bg-white/20" />
+                    <div className="absolute top-0 right-0 w-[0.5px] h-[12px] bg-white/20" />
+                    {/* Bottom-left corner */}
+                    <div className="absolute bottom-0 left-0 w-[12px] h-[0.5px] bg-white/20" />
+                    <div className="absolute bottom-0 left-0 w-[0.5px] h-[12px] bg-white/20" />
+                    {/* Bottom-right corner */}
+                    <div className="absolute bottom-0 right-0 w-[12px] h-[0.5px] bg-white/20" />
+                    <div className="absolute bottom-0 right-0 w-[0.5px] h-[12px] bg-white/20" />
+                    <div className="flex items-center justify-between mb-2 relative -mt-2 pb-1">
+                      <div className="relative">
+                        <button
+                          onClick={() => setShowTeamsDropdown(!showTeamsDropdown)}
+                          className="text-xs h-full font-mono uppercase text-gray-400 flex items-center space-x-1 hover:text-white transition-colors"
+                        >
+                          <ChevronDown className="w-3 h-3" />
+                          <span>{teamsPeriod}</span>
+                        </button>
+                        {showTeamsDropdown && (
+                          <div className="absolute top-6 left-0 w-[150px]  z-10 bg-black border border-white/10 rounded-none shadow-lg">
+                            {periodOptions.map((period) => (
+                              <button
+                                key={period}
+                                onClick={() => {
+                                  setTeamsPeriod(period);
+                                  setShowTeamsDropdown(false);
+                                }}
+                                className="block border-b border-dashed border-white/5 w-full text-left px-4 py-2 text-xs text-white hover:bg-white/10 transition-colors whitespace-nowrap"
+                              >
+                                {period}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {teamsPeriod === "Custom" && (
+                        <div className="h-0 flex items-center gap-2">
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="outline"
+                                className="h-6 px-2 text-xs font-mono uppercase text-gray-400 hover:text-white bg-transparent border-white/10 hover:bg-white/5"
+                              >
+                                <CalendarIcon className="mr-1 h-3 w-3" />
+                                {teamsDateFrom ? format(teamsDateFrom, "MMM dd yyyy") : "From"}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0 bg-black border-white/10">
+                              <Calendar
+                                mode="single"
+                                selected={teamsDateFrom}
+                                onSelect={setTeamsDateFrom}
+                                initialFocus
+                                className="rounded-none"
+                              />
+                            </PopoverContent>
+                          </Popover>
+
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="outline"
+                                className="h-6 px-2 text-xs font-mono uppercase text-gray-400 hover:text-white bg-transparent border-white/10 hover:bg-white/5"
+                              >
+                                <CalendarIcon className="mr-1 h-3 w-3" />
+                                {teamsDateTo ? format(teamsDateTo, "MMM dd yyyy") : "To"}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0 bg-black border-white/10">
+                              <Calendar
+                                mode="single"
+                                selected={teamsDateTo}
+                                onSelect={setTeamsDateTo}
+                                initialFocus
+                                disabled={(date) => (teamsDateFrom ? date < teamsDateFrom : false)}
+                                className="rounded-none"
+                              />
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                      )}
+                    </div>
+                    <hr className="mb-2 -mx-10 border-white/10" />
+                    <h4 className="text-md text-white/80 uppercase font-mono font-light mb-1">
+                      Teams
+                    </h4>
+                    <p className="text-xs text-gray-400 mb-3">Total teams in the time frame</p>
+                    <div className="flex pt-4 justify-between items-end">
+                      <p className="text-3xl text-white font-light">
+                        {teamsLoading ? "..." : formatFullNumber(teamsCount)}
+                      </p>
+                      <div className="mt-2 mb-1 flex items-center gap-2">
+                        <div className="flex items-center -mr-5 gap-1 px-2 py-1 rounded-none">
+                          <svg
+                            className={`w-3 h-3 ${teamsPercentage >= 0 ? "text-green-500" : "text-red-500 rotate-180"}`}
+                            viewBox="0 0 12 12"
+                            fill="currentColor"
+                          >
+                            <path d="M6 0 L12 12 L0 12 Z" />
+                          </svg>
+                          <span
+                            className={`text-xs font-medium ${teamsPercentage >= 0 ? "text-green-500" : "text-red-500"}`}
+                          >
+                            {Math.abs(teamsPercentage).toFixed(1)}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+            ),
+            "security-insights": (
+
+                <div className="bg-gradient-to-b from-white/[4%] to-white/[2.5%] border border-white/10 rounded-none p-3 md:p-6 pt-4 overflow-hidden relative flex flex-col flex-1">
+                  <div className="absolute top-0 left-0 w-[12px] h-[0.5px] bg-white/20" />
+                  <div className="absolute top-0 left-0 w-[0.5px] h-[12px] bg-white/20" />
+                  <div className="absolute top-0 right-0 w-[12px] h-[0.5px] bg-white/20" />
+                  <div className="absolute top-0 right-0 w-[0.5px] h-[12px] bg-white/20" />
+                  <div className="absolute bottom-0 left-0 w-[12px] h-[0.5px] bg-white/20" />
+                  <div className="absolute bottom-0 left-0 w-[0.5px] h-[12px] bg-white/20" />
+                  <div className="absolute bottom-0 right-0 w-[12px] h-[0.5px] bg-white/20" />
+                  <div className="absolute bottom-0 right-0 w-[0.5px] h-[12px] bg-white/20" />
+                  <div className="flex items-center justify-between mb-4 flex-shrink-0">
+                    <div className="flex items-center gap-2">
+                      <Shield className="w-4 h-4 text-white/60" />
+                      <h4 className="text-xs text-gray-400 uppercase font-mono font-light">
+                        Security Insights
+                      </h4>
+                    </div>
+                  </div>
+                  <hr className="-mx-10 -mt-1 border-white/10" />
+                  <div className="space-y-3 overflow-y-auto custom-scrollbar flex-1 min-h-0">
+                    {securityPatches.length === 0 && (
+                      <div className="text-sm flex items-center justify-center text-gray-400">
+                        <div className="flex mt-5 items-center justify-center">
+                          <Shield className="w-4 h-4 text-gray-400 mr-2" />
+                          <p className="text-center">No security insights found</p>
+                        </div>
+                      </div>
+                    )}
+                    {securityPatches.map((patch, index) => (
+                      <div
+                        key={patch.id}
+                        onClick={() => handlePatchClick(patch)}
+                        className="group py-2 border-b border-white/5 cursor-pointer transition-all duration-200 hover:border-white/20"
+                        style={{
+                          animation: `slideIn 0.3s ease-out ${index * 0.1}s both`,
+                        }}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <span className="text-sm text-white/90 font-light truncate group-hover:text-white transition-colors">
+                                {patch.title}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span
+                                className={`text-[9px] px-1.5 py-0.5 border rounded-sm uppercase font-mono ${getSeverityColor(
+                                  patch.severity,
+                                )}`}
+                              >
+                                {patch.severity}
+                              </span>
+                              <span
+                                className={`text-[9px] px-1.5 py-0.5 border rounded-sm capitalize font-mono ${getStatusColor(patch.status)}`}
+                              >
+                                {patch.status}
+                              </span>
+                            </div>
+                          </div>
+                          <ArrowUpRight className="w-3.5 h-3.5 text-gray-500 group-hover:text-white transition-all flex-shrink-0 mt-0.5" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+            ),
+          }}
+        />
+      </div>
+    );
+  };
+
+  return (
+    <div className="h-full min-h-0 bg-black text-white flex flex-col overflow-hidden">
+      {/* Tab Content */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {activeTab === "overview" ? (
+          <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar">
+            {renderOverview()}
+          </div>
+        ) : activeTab === "users" ? (
+          <UsersPage />
+        ) : activeTab === "organizations" ? (
+          <OrganizationsPage />
+        ) : (
+          renderOverview()
+        )}
+      </div>
+
+
+      {/* Quick Actions Modal */}
+      {showQuickActionsModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3 md:p-6">
+          <div className="bg-black/90 border border-dashed border-white/20 p-3 md:p-6 w-full max-w-3xl rounded-none max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center space-x-3">
+                <Zap className="w-6 h-6 text-white" />
+                <h3 className="text-lg text-white font-light">Quick Actions</h3>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowQuickActionsModal(false)}
+                className="text-gray-400 hover:text-white rounded-none"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Navigate to Users */}
+              <button
+                onClick={() => {
+                  setShowQuickActionsModal(false);
+                  navigate("/users");
+                }}
+                className="flex items-center space-x-4 p-4 bg-black/30 border border-dashed border-white/20 rounded-none hover:bg-black/50 transition-colors text-left group"
+              >
+                <div className="p-2 bg-white/10 rounded-none group-hover:bg-white/20 transition-colors">
+                  <Users className="w-6 h-6 text-white" />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-white font-light mb-1">View All Users</h4>
+                  <p className="text-sm text-gray-400">Manage user accounts</p>
+                </div>
+                <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-white transition-colors" />
+              </button>
+
+              {/* Navigate to Organizations */}
+              <button
+                onClick={() => {
+                  setShowQuickActionsModal(false);
+                  navigate("/organizations");
+                }}
+                className="flex items-center space-x-4 p-4 bg-black/30 border border-dashed border-white/20 rounded-none hover:bg-black/50 transition-colors text-left group"
+              >
+                <div className="p-2 bg-white/10 rounded-none group-hover:bg-white/20 transition-colors">
+                  <Building2 className="w-6 h-6 text-white" />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-white font-light mb-1">View Organizations</h4>
+                  <p className="text-sm text-gray-400">Manage organizations</p>
+                </div>
+                <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-white transition-colors" />
+              </button>
+
+              {/* Navigate to Sessions */}
+              <button
+                onClick={() => {
+                  setShowQuickActionsModal(false);
+                  navigate("/sessions");
+                }}
+                className="flex items-center space-x-4 p-4 bg-black/30 border border-dashed border-white/20 rounded-none hover:bg-black/50 transition-colors text-left group"
+              >
+                <div className="p-2 bg-white/10 rounded-none group-hover:bg-white/20 transition-colors">
+                  <BarChart3 className="w-6 h-6 text-white" />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-white font-light mb-1">View Sessions</h4>
+                  <p className="text-sm text-gray-400">Monitor active sessions</p>
+                </div>
+                <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-white transition-colors" />
+              </button>
+
+              {/* Navigate to Database */}
+              <button
+                onClick={() => {
+                  setShowQuickActionsModal(false);
+                  navigate("/database");
+                }}
+                className="flex items-center space-x-4 p-4 bg-black/30 border border-dashed border-white/20 rounded-none hover:bg-black/50 transition-colors text-left group"
+              >
+                <div className="p-2 bg-white/10 rounded-none group-hover:bg-white/20 transition-colors">
+                  <Database className="w-6 h-6 text-white" />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-white font-light mb-1">Database Schema</h4>
+                  <p className="text-sm text-gray-400">View schema visualizer</p>
+                </div>
+                <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-white transition-colors" />
+              </button>
+
+              {/* Navigate to Settings */}
+              <button
+                onClick={() => {
+                  setShowQuickActionsModal(false);
+                  navigate("/settings");
+                }}
+                className="flex items-center space-x-4 p-4 bg-black/30 border border-dashed border-white/20 rounded-none hover:bg-black/50 transition-colors text-left group"
+              >
+                <div className="p-2 bg-white/10 rounded-none group-hover:bg-white/20 transition-colors">
+                  <Settings className="w-6 h-6 text-white" />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-white font-light mb-1">Settings</h4>
+                  <p className="text-sm text-gray-400">Configure system</p>
+                </div>
+                <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-white transition-colors" />
+              </button>
+
+              {/* Search Users */}
+              <button
+                onClick={() => {
+                  setShowQuickActionsModal(false);
+                  navigate("/users");
+                  // Could add search focus functionality here
+                }}
+                className="flex items-center space-x-4 p-4 bg-black/30 border border-dashed border-white/20 rounded-none hover:bg-black/50 transition-colors text-left group"
+              >
+                <div className="p-2 bg-white/10 rounded-none group-hover:bg-white/20 transition-colors">
+                  <Search className="w-6 h-6 text-white" />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-white font-light mb-1">Search Users</h4>
+                  <p className="text-sm text-gray-400">Find specific users</p>
+                </div>
+                <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-white transition-colors" />
+              </button>
+            </div>
+
+            <div className="mt-6 pt-6 border-t border-dashed border-white/10">
+              <div className="flex items-center justify-between text-sm text-gray-400">
+                <span>Tip: Press Ctrl+K or Cmd+K for command palette</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowQuickActionsModal(false)}
+                  className="text-gray-400 hover:text-white rounded-none"
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Security Patch Modal */}
+      {showPatchModal && selectedPatch && (
+        <div
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          style={{
+            animation: "fadeIn 0.3s ease-out",
+          }}
+          onClick={closePatchModal}
+        >
+          <div
+            className="bg-black border border-white/20 rounded-none max-w-2xl w-full max-h-[80vh] overflow-y-auto"
+            style={{
+              animation: "slideUp 0.3s ease-out",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-black border-b border-white/10 p-3 md:p-6 z-10">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-2">
+                    <Shield className="w-6 h-6 text-white" />
+                    <h3 className="text-xl text-white font-light">{selectedPatch.title}</h3>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span
+                      className={`text-xs px-2 py-1 border rounded-none uppercase font-medium ${getSeverityColor(
+                        selectedPatch.severity,
+                      )}`}
+                    >
+                      {selectedPatch.severity} Severity
+                    </span>
+                    <span
+                      className={`text-xs px-2 py-1 border rounded-none capitalize ${getStatusColor(
+                        selectedPatch.status,
+                      )}`}
+                    >
+                      {selectedPatch.status}
+                    </span>
+                    {selectedPatch.cve && (
+                      <span className="text-xs text-gray-400 font-mono bg-white/5 px-2 py-1 border border-white/10 rounded-none">
+                        {selectedPatch.cve}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={closePatchModal}
+                  className="p-2 hover:bg-white/10 transition-colors rounded-none"
+                >
+                  <X className="w-5 h-5 text-gray-400 hover:text-white" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-3 md:p-6 space-y-6">
+              {/* Date */}
+              <div>
+                <h4 className="text-sm text-gray-400 uppercase tracking-wide mb-2">Release Date</h4>
+                <p className="text-white">
+                  {new Date(selectedPatch.date).toLocaleDateString("en-US", {
+                    year: "numeric",
+                    month: "long",
+                    day: "numeric",
+                  })}
+                </p>
+              </div>
+
+              {/* Description */}
+              <div>
+                <h4 className="text-sm text-gray-400 uppercase tracking-wide mb-2">Description</h4>
+                {selectedPatch.description.includes("npm install") ? (
+                  <div>
+                    <p className="text-white leading-relaxed mb-3">
+                      {selectedPatch.description.split("Run:")[0]}
+                    </p>
+                    <div className="relative group">
+                      <div className="bg-black border border-white/20 rounded-none p-3 font-mono text-sm">
+                        <div className="flex items-center justify-between">
+                          <code>
+                            <span className="text-green-400">$</span>{" "}
+                            <span className="text-cyan-400">npm</span>{" "}
+                            <span className="text-yellow-400">install</span>{" "}
+                            <span className="text-white">better-auth@latest</span>
+                          </code>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText("npm install better-auth@latest");
+                              toast.success("Command copied to clipboard");
+                            }}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-white/10 rounded"
+                            title="Copy command"
+                          >
+                            <Copy className="w-4 h-4 text-gray-400 hover:text-white" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-white leading-relaxed">{selectedPatch.description}</p>
+                )}
+              </div>
+
+              {/* Affected Components */}
+              <div>
+                <h4 className="text-sm text-gray-400 uppercase tracking-wide mb-3">
+                  Affected Components
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {selectedPatch.affectedComponents.map((component, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center gap-2 p-3 bg-white/5 border border-white/10 rounded-none"
+                      style={{
+                        animation: `slideIn 0.3s ease-out ${index * 0.1}s both`,
+                      }}
+                    >
+                      <div className="w-2 h-2 bg-white rounded-none flex-shrink-0" />
+                      <span className="text-sm text-white">{component}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Status Info */}
+              <div className="p-4 bg-white/5 border border-white/10 rounded-none">
+                <div className="flex items-start gap-3">
+                  {selectedPatch.status === "applied" && (
+                    <>
+                      <CheckCircle className="w-5 h-5 text-white flex-shrink-0 mt-0.5" />
+                      <div>
+                        <h5 className="text-sm text-white font-medium mb-1">Patch Applied</h5>
+                        <p className="text-xs text-gray-400">
+                          This security patch has been successfully applied to your system.
+                        </p>
+                      </div>
+                    </>
+                  )}
+                  {selectedPatch.status === "scheduled" && (
+                    <>
+                      <Clock className="w-5 h-5 text-white flex-shrink-0 mt-0.5" />
+                      <div>
+                        <h5 className="text-sm text-white font-medium mb-1">Scheduled</h5>
+                        <p className="text-xs text-gray-400">
+                          This patch is scheduled for deployment in the next maintenance window.
+                        </p>
+                      </div>
+                    </>
+                  )}
+                  {selectedPatch.status === "pending" && (
+                    <>
+                      <AlertTriangle className="w-5 h-5 text-white flex-shrink-0 mt-0.5" />
+                      <div>
+                        <h5 className="text-sm text-white font-medium mb-1">Action Required</h5>
+                        <p className="text-xs text-gray-400">
+                          This patch is pending review and requires manual approval before
+                          deployment.
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/10">
+                <Button
+                  variant="ghost"
+                  onClick={closePatchModal}
+                  className="text-gray-400 hover:text-white rounded-none"
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+
+        @keyframes slideUp {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        @keyframes slideIn {
+          from {
+            opacity: 0;
+            transform: translateX(-10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0);
+          }
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.05);
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.2);
+          border-radius: 3px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.3);
+        }
+      `}</style>
+    </div>
+  );
+}

@@ -1,0 +1,1112 @@
+import { format } from "date-fns";
+import {
+  ArrowDown,
+  ArrowUp,
+  Database,
+  Edit,
+  Eye,
+  Filter,
+  Globe,
+  Loader,
+  Plus,
+  Search,
+  Trash2,
+  User,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { CopyableId } from "../components/CopyableId";
+import { SessionDeviceIcon } from "../components/SessionDeviceIcon";
+import { Terminal } from "../components/Terminal";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
+import { parseSessionDevice } from "../lib/session-device";
+import { buildApiUrl } from "../utils/api";
+
+interface LocationData {
+  country: string;
+  countryCode: string;
+  city: string;
+  region: string;
+}
+
+interface Session {
+  id: string;
+  userId: string;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+  ipAddress?: string;
+  userAgent?: string | null;
+}
+
+export default function Sessions() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [showSeedModal, setShowSeedModal] = useState(false);
+  const [selectedSession, setSelectedSession] = useState<Session | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [seedingLogs, setSeedingLogs] = useState<
+    Array<{
+      id: string;
+      type: "info" | "success" | "error" | "progress";
+      message: string;
+      timestamp: Date;
+      status?: "pending" | "running" | "completed" | "failed";
+    }>
+  >([]);
+  const [isSeeding, setIsSeeding] = useState(false);
+  const [sessionSortOrder, setSessionSortOrder] = useState<"newest" | "oldest">("newest");
+  const [sessionLocations, setSessionLocations] = useState<Record<string, LocationData>>({});
+  const sessionLocationsRef = useRef<Record<string, LocationData>>({});
+
+  useEffect(() => {
+    const state = location.state as { openModal?: string } | null;
+    if (state?.openModal) {
+      if (state.openModal === "create") setShowCreateModal(true);
+      if (state.openModal === "seed") setShowSeedModal(true);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, navigate, location.pathname]);
+
+  const resolveIPLocation = useCallback(async (ipAddress: string): Promise<LocationData | null> => {
+    try {
+      const response = await fetch(buildApiUrl("/api/geo/resolve"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ipAddress }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.location) return data.location;
+      }
+      return null;
+    } catch (_error) {
+      return null;
+    }
+  }, []);
+
+  const resolveSessionLocations = useCallback(
+    async (sessionsList: Session[]) => {
+      const pending = sessionsList.filter((s) => s.ipAddress && !sessionLocationsRef.current[s.id]);
+      if (pending.length === 0) return;
+      const results = await Promise.all(
+        pending.map(async (session) => {
+          const location = await resolveIPLocation(session.ipAddress!);
+          return location ? { sessionId: session.id, location } : null;
+        }),
+      );
+      const updates: Record<string, LocationData> = {};
+      results.forEach((r) => {
+        if (r) updates[r.sessionId] = r.location;
+      });
+      if (Object.keys(updates).length > 0) {
+        sessionLocationsRef.current = { ...sessionLocationsRef.current, ...updates };
+        setSessionLocations(sessionLocationsRef.current);
+      }
+    },
+    [resolveIPLocation],
+  );
+
+  const getCountryFlag = useCallback((countryCode: string): string => {
+    if (!countryCode) return "🌍";
+    const codePoints = countryCode
+      .toUpperCase()
+      .split("")
+      .map((char) => 127397 + char.charCodeAt(0));
+    return String.fromCodePoint(...codePoints);
+  }, []);
+
+  const fetchSessions = useCallback(async () => {
+    try {
+      const response = await fetch(buildApiUrl("/api/sessions"));
+      const data = await response.json();
+      const list = data.sessions || data.data || [];
+      setSessions(list);
+      resolveSessionLocations(list);
+    } catch (_error) {
+    } finally {
+      setLoading(false);
+    }
+  }, [resolveSessionLocations]);
+
+  useEffect(() => {
+    fetchSessions();
+  }, [fetchSessions]);
+
+  const handleSeedSessions = async (count: number) => {
+    setSeedingLogs([]);
+    setIsSeeding(true);
+
+    setSeedingLogs([
+      {
+        id: "start",
+        type: "info",
+        message: `Starting session seeding process for ${count} sessions...`,
+        timestamp: new Date(),
+      },
+    ]);
+
+    try {
+      const response = await fetch("/api/seed/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ count }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        const progressLogs = result.results.map((r: any, index: number) => {
+          if (r.success) {
+            return {
+              id: `session-${index}`,
+              type: "progress" as const,
+              message: `Creating session: ${r.session.id}`,
+              timestamp: new Date(),
+              status: "completed" as const,
+            };
+          } else {
+            return {
+              id: `session-${index}`,
+              type: "error" as const,
+              message: `Failed to create session ${index + 1}: ${r.error}`,
+              timestamp: new Date(),
+            };
+          }
+        });
+
+        setSeedingLogs((prev) => [...prev, ...progressLogs]);
+
+        const successCount = result.results.filter((r: any) => r.success).length;
+        setSeedingLogs((prev) => [
+          ...prev,
+          {
+            id: "complete",
+            type: "success",
+            message: `✅ Seeding completed! Created ${successCount}/${count} sessions successfully`,
+            timestamp: new Date(),
+          },
+        ]);
+
+        await fetchSessions();
+      } else {
+        setSeedingLogs((prev) => [
+          ...prev,
+          {
+            id: "error",
+            type: "error",
+            message: `❌ Seeding failed: ${result.error || "Unknown error"}`,
+            timestamp: new Date(),
+          },
+        ]);
+      }
+    } catch (error) {
+      setSeedingLogs((prev) => [
+        ...prev,
+        {
+          id: "error",
+          type: "error",
+          message: `❌ Network error: ${error}`,
+          timestamp: new Date(),
+        },
+      ]);
+    } finally {
+      setIsSeeding(false);
+    }
+  };
+
+  const handleSeedAccounts = async (count: number) => {
+    setSeedingLogs([]);
+    setIsSeeding(true);
+
+    setSeedingLogs([
+      {
+        id: "start",
+        type: "info",
+        message: `Starting account seeding process for ${count} accounts...`,
+        timestamp: new Date(),
+      },
+    ]);
+
+    try {
+      const response = await fetch("/api/seed/accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ count }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        const progressLogs = result.results.map((r: any, index: number) => {
+          if (r.success) {
+            return {
+              id: `account-${index}`,
+              type: "progress" as const,
+              message: `Creating account: ${r.account.provider}`,
+              timestamp: new Date(),
+              status: "completed" as const,
+            };
+          } else {
+            return {
+              id: `account-${index}`,
+              type: "error" as const,
+              message: `Failed to create account ${index + 1}: ${r.error}`,
+              timestamp: new Date(),
+            };
+          }
+        });
+
+        setSeedingLogs((prev) => [...prev, ...progressLogs]);
+
+        const successCount = result.results.filter((r: any) => r.success).length;
+        setSeedingLogs((prev) => [
+          ...prev,
+          {
+            id: "complete",
+            type: "success",
+            message: `✅ Seeding completed! Created ${successCount}/${count} accounts successfully`,
+            timestamp: new Date(),
+          },
+        ]);
+
+        await fetchSessions();
+      } else {
+        setSeedingLogs((prev) => [
+          ...prev,
+          {
+            id: "error",
+            type: "error",
+            message: `❌ Seeding failed: ${result.error || "Unknown error"}`,
+            timestamp: new Date(),
+          },
+        ]);
+      }
+    } catch (error) {
+      setSeedingLogs((prev) => [
+        ...prev,
+        {
+          id: "error",
+          type: "error",
+          message: `❌ Network error: ${error}`,
+          timestamp: new Date(),
+        },
+      ]);
+    } finally {
+      setIsSeeding(false);
+    }
+  };
+
+  const openViewModal = (session: Session) => {
+    setSelectedSession(session);
+    setShowViewModal(true);
+  };
+
+  useEffect(() => {
+    if (!showViewModal || !selectedSession?.ipAddress || sessionLocations[selectedSession.id])
+      return;
+    let cancelled = false;
+    resolveIPLocation(selectedSession.ipAddress).then((location) => {
+      if (cancelled || !location) return;
+      setSessionLocations((prev) => ({ ...prev, [selectedSession.id]: location }));
+      sessionLocationsRef.current = {
+        ...sessionLocationsRef.current,
+        [selectedSession.id]: location,
+      };
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    showViewModal,
+    selectedSession?.id,
+    selectedSession?.ipAddress,
+    sessionLocations,
+    resolveIPLocation,
+  ]);
+
+  const openEditModal = (session: Session) => {
+    setSelectedSession(session);
+    setShowEditModal(true);
+  };
+
+  const openDeleteModal = (session: Session) => {
+    setSelectedSession(session);
+    setShowDeleteModal(true);
+  };
+
+  const handleCreateSession = async (_sessionData: any) => {
+    setIsCreating(true);
+    const toastId = toast.loading("Creating session...");
+    try {
+      // TODO: Implement actual session creation
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      setShowCreateModal(false);
+      toast.success("Session created successfully!", { id: toastId });
+    } catch (error) {
+      toast.error("Error creating session", { id: toastId });
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const handleUpdateSession = async (_sessionData: any) => {
+    setIsUpdating(true);
+    const toastId = toast.loading("Updating session...");
+    try {
+      // TODO: Implement actual session update
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      setShowEditModal(false);
+      toast.success("Session updated successfully!", { id: toastId });
+    } catch (error) {
+      toast.error("Error updating session", { id: toastId });
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleDeleteSession = async () => {
+    setShowDeleteModal(false);
+  };
+
+  const filteredSessions = sessions.filter((session) => {
+    const normalizedSearch = searchTerm.toLowerCase();
+    const deviceInfo = parseSessionDevice(session.userAgent);
+    const matchesSearch =
+      session.id.toLowerCase().includes(normalizedSearch) ||
+      session.userId.toLowerCase().includes(normalizedSearch) ||
+      session.userAgent?.toLowerCase().includes(normalizedSearch) ||
+      deviceInfo.device.label.toLowerCase().includes(normalizedSearch) ||
+      deviceInfo.os.label.toLowerCase().includes(normalizedSearch) ||
+      deviceInfo.browser.label.toLowerCase().includes(normalizedSearch) ||
+      deviceInfo.vendor?.toLowerCase().includes(normalizedSearch) ||
+      deviceInfo.model?.toLowerCase().includes(normalizedSearch);
+    const matchesFilter =
+      filter === "all" ||
+      (filter === "active" && new Date(session.expiresAt) > new Date()) ||
+      (filter === "expired" && new Date(session.expiresAt) <= new Date());
+    return matchesSearch && matchesFilter;
+  });
+
+  const sortedSessions = useMemo(() => {
+    const list = [...filteredSessions];
+    list.sort((a, b) => {
+      const ta = new Date(a.expiresAt).getTime();
+      const tb = new Date(b.expiresAt).getTime();
+      return sessionSortOrder === "newest" ? tb - ta : ta - tb;
+    });
+    return list;
+  }, [filteredSessions, sessionSortOrder]);
+
+  const selectedDeviceInfo = selectedSession ? parseSessionDevice(selectedSession.userAgent) : null;
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-32">
+        <div className="flex flex-col items-center space-y-3">
+          <Loader className="w-6 h-6 text-white animate-spin" />
+          <div className="text-white text-sm">Loading sessions...</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 p-3 md:p-6">
+      {/* Header */}
+      <div className="flex flex-col gap-3 md:flex-row md:gap-0 md:items-center md:justify-between">
+        <div>
+          <h1 className="text-xl md:text-2xl relative text-white font-light inline-flex items-start">
+            Sessions
+            <sup className="text-xs text-gray-500 ml-1 mt-0">
+              <span className="mr-1">[</span>
+              <span className="text-white font-mono text-sm">{sessions.length}</span>
+              <span className="ml-1">]</span>
+            </sup>
+          </h1>
+          <p className="text-gray-400 mt-1 uppercase font-mono text-xs md:text-sm font-light">
+            Manage user sessions and accounts
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 items-center">
+          <Button
+            className="border border-dashed border-white/20 text-white hover:bg-white/10 rounded-none font-mono uppercase font-medium text-xs tracking-tight"
+            onClick={() => setShowSeedModal(true)}
+          >
+            <Database className="w-4 h-4 mr-2" />
+            Seed
+          </Button>
+          <Button
+            className="bg-white hover:bg-white/90 text-black border border-white/20 rounded-none"
+            onClick={() => setShowCreateModal(true)}
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Add Session
+          </Button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:space-x-4">
+        <div className="flex-1 relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+          <Input
+            placeholder="Search sessions..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 border border-dashed border-white/20 bg-black/30 text-white rounded-none"
+          />
+        </div>
+
+        <div className="flex-1 md:flex-none md:w-[130px]">
+          <Select value={filter} onValueChange={setFilter}>
+            <SelectTrigger className="w-full font-mono uppercase sm:text-[11px] border border-dashed border-white/20 bg-black/30 text-white rounded-none">
+              <div className="flex items-center space-x-2">
+                <Filter className="w-4 h-4 text-gray-400" />
+                <SelectValue className="pr-2" />
+              </div>
+            </SelectTrigger>
+            <SelectContent className="font-mono uppercase text-[11px]">
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="expired">Expired</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Sessions Table */}
+      <div className="bg-black/30 border border-dashed border-white/20 rounded-none">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-dashed border-white/10">
+                <th className="text-left py-3 px-2 md:py-4 md:px-4 text-white font-mono uppercase text-xs">
+                  Session
+                </th>
+                <th className="hidden md:table-cell text-left py-4 px-4 text-white font-mono uppercase text-xs">
+                  User ID
+                </th>
+                <th className="hidden lg:table-cell text-left py-4 px-4 text-white font-mono uppercase text-xs">
+                  IP / Location
+                </th>
+                <th className="hidden sm:table-cell text-left py-3 px-2 md:py-4 md:px-4 text-white font-mono uppercase text-xs">
+                  Status
+                </th>
+                <th className="hidden sm:table-cell text-left py-3 px-2 md:py-4 md:px-4 text-white font-mono uppercase text-xs">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSessionSortOrder((prev) => (prev === "newest" ? "oldest" : "newest"))
+                    }
+                    className="flex items-center gap-1.5 font-mono uppercase hover:text-white/90 transition-colors"
+                  >
+                    Expires
+                    {sessionSortOrder === "newest" ? (
+                      <ArrowDown className="w-3.5 h-3.5 text-white/70" />
+                    ) : (
+                      <ArrowUp className="w-3.5 h-3.5 text-white/70" />
+                    )}
+                  </button>
+                </th>
+                <th className="text-right py-3 px-2 md:py-4 md:px-4 text-white font-mono uppercase text-xs">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedSessions.map((session) => (
+                <tr
+                  key={session.id}
+                  className="border-b border-dashed border-white/5 hover:bg-white/5"
+                >
+                  <td className="py-3 px-2 md:py-4 md:px-4">
+                    <div className="flex items-center space-x-2 md:space-x-3">
+                      <div className="w-8 h-8 md:w-10 md:h-10 rounded-none border border-dashed border-white/20 bg-white/10 flex items-center justify-center flex-shrink-0">
+                        <Database className="w-4 h-4 md:w-5 md:h-5 text-white" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-white font-light text-xs md:text-sm truncate">
+                          Session {session.id.slice(0, 8)}...
+                        </div>
+                        <span className="hidden sm:block">
+                          <CopyableId id={session.id} />
+                        </span>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="hidden md:table-cell py-4 px-4 text-white text-sm">
+                    {session.userId}
+                  </td>
+                  <td className="hidden lg:table-cell py-4 px-4 text-sm text-gray-400">
+                    {session.ipAddress ? (
+                      <div className="flex flex-col font-mono text-xs">
+                        <span className="text-white/90">{session.ipAddress}</span>
+                        {sessionLocations[session.id] ? (
+                          <div className="flex items-center gap-1.5 mt-1 text-gray-500">
+                            <Globe className="w-3 h-3 shrink-0" />
+                            <span>
+                              {sessionLocations[session.id].city},{" "}
+                              {sessionLocations[session.id].country}
+                            </span>
+                            {sessionLocations[session.id].countryCode && (
+                              <span>
+                                {getCountryFlag(sessionLocations[session.id].countryCode)}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-gray-500 mt-1">Resolving...</span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-gray-500">—</span>
+                    )}
+                  </td>
+                  <td className="hidden sm:table-cell py-3 px-2 md:py-4 md:px-4">
+                    <div className="flex items-center space-x-1.5 md:space-x-2">
+                      {new Date(session.expiresAt) > new Date() ? (
+                        <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+                      ) : (
+                        <div className="w-2 h-2 bg-red-400 rounded-full"></div>
+                      )}
+                      <span className="text-[10px] md:text-sm text-gray-400">
+                        {new Date(session.expiresAt) > new Date() ? "Active" : "Expired"}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="hidden sm:table-cell py-3 px-2 md:py-4 md:px-4 text-[10px] md:text-sm text-gray-400">
+                    {new Date(session.expiresAt).toLocaleDateString()}
+                  </td>
+                  <td className="py-3 px-2 md:py-4 md:px-4 text-right">
+                    <div className="flex items-center justify-end space-x-1 md:space-x-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-gray-400 hover:text-white rounded-none h-7 w-7 md:h-9 md:w-9 p-0"
+                        onClick={() => openViewModal(session)}
+                        aria-label={`View session ${session.id}`}
+                      >
+                        <Eye className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-gray-400 hover:text-white rounded-none h-7 w-7 md:h-9 md:w-9 p-0"
+                        onClick={() => openEditModal(session)}
+                        aria-label={`Edit session ${session.id}`}
+                      >
+                        <Edit className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-400 hover:text-red-300 rounded-none h-7 w-7 md:h-9 md:w-9 p-0"
+                        onClick={() => openDeleteModal(session)}
+                        aria-label={`Delete session ${session.id}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Seed Modal */}
+      {showSeedModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3 md:p-6">
+          <div className="bg-black/90 border border-dashed border-white/20 p-3 md:p-6 w-full max-w-2xl rounded-none max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg text-white font-light">Seed Data</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowSeedModal(false)}
+                className="text-gray-400 hover:text-white rounded-none"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+            <div className="space-y-6">
+              {/* Session Seeding */}
+              <div className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <Database className="w-5 h-5 text-white" />
+                  <h4 className="text-white font-light">Seed Sessions</h4>
+                </div>
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:space-x-3">
+                  <div className="flex-1">
+                    <Label htmlFor="session-count" className="text-sm text-gray-400 font-light">
+                      Number of sessions
+                    </Label>
+                    <Input
+                      id="session-count"
+                      type="number"
+                      min="1"
+                      max="100"
+                      defaultValue="5"
+                      className="mt-1 border border-dashed border-white/20 bg-black/30 text-white rounded-none"
+                    />
+                  </div>
+                  <Button
+                    onClick={() => {
+                      const count = parseInt(
+                        (document.getElementById("session-count") as HTMLInputElement)?.value ||
+                          "5",
+                        10,
+                      );
+                      handleSeedSessions(count);
+                    }}
+                    disabled={isSeeding}
+                    className="bg-white hover:bg-white/90 text-black border border-white/20 rounded-none mt-6 disabled:opacity-50 font-mono uppercase font-medium text-xs tracking-tight"
+                  >
+                    {isSeeding ? (
+                      <>
+                        <Loader className="w-3 h-3 mr-2 animate-spin" />
+                        Seeding...
+                      </>
+                    ) : (
+                      <>
+                        <Database className="w-3 h-3 mr-2" />
+                        Seed Sessions
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Account Seeding */}
+              <div className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <User className="w-5 h-5 text-white" />
+                  <h4 className="text-white font-light">Seed Accounts</h4>
+                </div>
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:space-x-3">
+                  <div className="flex-1">
+                    <Label htmlFor="account-count" className="text-sm text-gray-400 font-light">
+                      Number of accounts
+                    </Label>
+                    <Input
+                      id="account-count"
+                      type="number"
+                      min="1"
+                      max="100"
+                      defaultValue="5"
+                      className="mt-1 border border-dashed border-white/20 bg-black/30 text-white rounded-none"
+                    />
+                  </div>
+                  <Button
+                    onClick={() => {
+                      const count = parseInt(
+                        (document.getElementById("account-count") as HTMLInputElement)?.value ||
+                          "5",
+                        10,
+                      );
+                      handleSeedAccounts(count);
+                    }}
+                    disabled={isSeeding}
+                    className="bg-white hover:bg-white/90 text-black border border-white/20 rounded-none mt-6 disabled:opacity-50 font-mono uppercase font-medium text-xs tracking-tight"
+                  >
+                    {isSeeding ? (
+                      <>
+                        <Loader className="w-3 h-3 mr-2 animate-spin" />
+                        Seeding...
+                      </>
+                    ) : (
+                      <>
+                        <User className="w-3 h-3 mr-2" />
+                        Seed Accounts
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Seeding Logs */}
+              {seedingLogs.length > 0 && (
+                <div className="mt-6">
+                  <Terminal
+                    title="Session Seeding Terminal"
+                    lines={seedingLogs}
+                    isRunning={isSeeding}
+                    className="w-full"
+                    defaultCollapsed={true}
+                  />
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end mt-6 pt-6 border-t border-dashed border-white/10">
+              <Button
+                variant="outline"
+                onClick={() => setShowSeedModal(false)}
+                className="border border-dashed border-white/20 text-white hover:bg-white/10 rounded-none font-mono uppercase font-medium text-xs tracking-tight"
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Session Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-3 md:p-6">
+          <div className="bg-black border border-white/15 rounded-none p-3 md:p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg text-white font-light uppercase font-mono">Create Session</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowCreateModal(false)}
+                className="text-gray-400 -mt-2 hover:text-white rounded-none"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+
+            <div className="flex flex-col items-center justify-center mt-2">
+              <hr className="w-[calc(100%+3rem)] border-white/10 h-px" />
+              <div className="relative z-20 h-4 w-[calc(100%+3rem)] mx-auto -translate-x-1/2 left-1/2 bg-[repeating-linear-gradient(-45deg,#ffffff,#ffffff_1px,transparent_1px,transparent_6px)] opacity-[7%]" />
+              <hr className="w-[calc(100%+3rem)] border-white/10 h-px" />
+            </div>
+
+            <div className="space-y-4 mt-4">
+              <div>
+                <Label
+                  htmlFor="create-user-id"
+                  className="text-xs text-white/80 font-mono uppercase"
+                >
+                  User ID
+                </Label>
+                <Input
+                  id="create-user-id"
+                  className="mt-1 border border-dashed border-white/20 bg-black/30 text-white rounded-none"
+                />
+              </div>
+              <div>
+                <Label
+                  htmlFor="create-expires"
+                  className="text-xs text-white/80 font-mono uppercase"
+                >
+                  Expires At
+                </Label>
+                <Input
+                  id="create-expires"
+                  type="datetime-local"
+                  className="mt-1 border border-dashed border-white/20 bg-black/30 text-white rounded-none"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end space-x-3 mt-6">
+              <Button
+                variant="outline"
+                onClick={() => setShowCreateModal(false)}
+                className="border border-dashed border-white/20 text-white hover:bg-white/10 rounded-none font-mono uppercase font-medium text-xs tracking-tight"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => handleCreateSession({})}
+                disabled={isCreating}
+                className="bg-white hover:bg-white/90 text-black border border-white/20 rounded-none disabled:opacity-50 font-mono uppercase font-medium text-xs tracking-tight"
+              >
+                {isCreating ? "Creating..." : "Create"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Session Modal */}
+      {showEditModal && selectedSession && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3 md:p-6">
+          <div className="bg-black/90 border border-dashed border-white/20 p-3 md:p-6 w-full max-w-md rounded-none max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg text-white font-light">Edit Session</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowEditModal(false)}
+                className="text-gray-400 hover:text-white rounded-none"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+            <div className="space-y-4">
+              <div className="flex items-center space-x-3">
+                <div className="w-16 h-16 rounded-none border border-dashed border-white/20 bg-white/10 flex items-center justify-center">
+                  <Database className="w-8 h-8 text-white" />
+                </div>
+                <div>
+                  <div className="text-white font-light">
+                    Session {selectedSession.id.slice(0, 8)}...
+                  </div>
+                  <div className="text-sm text-gray-400">{selectedSession.userId}</div>
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="edit-user-id" className="text-sm text-gray-400 font-light">
+                  User ID
+                </Label>
+                <Input
+                  id="edit-user-id"
+                  defaultValue={selectedSession.userId}
+                  className="mt-1 border border-dashed border-white/20 bg-black/30 text-white rounded-none"
+                />
+              </div>
+              <div>
+                <Label htmlFor="edit-expires" className="text-sm text-gray-400 font-light">
+                  Expires At
+                </Label>
+                <Input
+                  id="edit-expires"
+                  type="datetime-local"
+                  defaultValue={new Date(selectedSession.expiresAt).toISOString().slice(0, 16)}
+                  className="mt-1 border border-dashed border-white/20 bg-black/30 text-white rounded-none"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end space-x-3 mt-6">
+              <Button
+                variant="outline"
+                onClick={() => setShowEditModal(false)}
+                className="border border-dashed border-white/20 text-white hover:bg-white/10 rounded-none font-mono uppercase font-medium text-xs tracking-tight"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => handleUpdateSession({})}
+                disabled={isUpdating}
+                className="bg-white hover:bg-white/90 text-black border border-white/20 rounded-none disabled:opacity-50 font-mono uppercase font-medium text-xs tracking-tight"
+              >
+                {isUpdating ? "Updating..." : "Update"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Session Modal */}
+      {showDeleteModal && selectedSession && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-3 md:p-6">
+          <div className="bg-black border border-white/15 rounded-none p-3 md:p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg text-white font-light uppercase font-mono">Delete Session</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowDeleteModal(false)}
+                className="text-gray-400 -mt-2 hover:text-white rounded-none"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+
+            <div className="flex flex-col items-center justify-center mt-2">
+              <hr className="w-[calc(100%+3rem)] border-white/10 h-px" />
+              <div className="relative z-20 h-4 w-[calc(100%+3rem)] mx-auto -translate-x-1/2 left-1/2 bg-[repeating-linear-gradient(-45deg,#ffffff,#ffffff_1px,transparent_1px,transparent_6px)] opacity-[7%]" />
+              <hr className="w-[calc(100%+3rem)] border-white/10 h-px" />
+            </div>
+
+            <div className="space-y-4 mt-4">
+              <div className="flex items-center space-x-3">
+                <div className="w-16 h-16 rounded-none border border-dashed border-white/20 bg-white/10 flex items-center justify-center">
+                  <Database className="w-8 h-8 text-white" />
+                </div>
+                <div>
+                  <div className="text-white font-light">
+                    Session {selectedSession.id.slice(0, 8)}...
+                  </div>
+                  <div className="text-sm text-gray-400">{selectedSession.userId}</div>
+                </div>
+              </div>
+              <p className="text-gray-400">
+                Are you sure you want to delete this session? This action cannot be undone.
+              </p>
+            </div>
+            <div className="flex justify-end space-x-3 mt-6">
+              <Button
+                variant="outline"
+                onClick={() => setShowDeleteModal(false)}
+                className="border border-dashed border-white/20 text-white hover:bg-white/10 rounded-none font-mono uppercase font-medium text-xs tracking-tight"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleDeleteSession}
+                className="bg-red-600 hover:bg-red-700 text-white border border-red-600 rounded-none font-mono uppercase font-medium text-xs tracking-tight"
+              >
+                Delete
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* View Session Modal */}
+      {showViewModal && selectedSession && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-3 md:p-6">
+          <div className="bg-black border border-white/15 rounded-none p-3 md:p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg text-white font-light uppercase font-mono">Session Details</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowViewModal(false)}
+                className="text-gray-400 -mt-2 hover:text-white rounded-none"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+
+            <div className="flex flex-col items-center justify-center mt-2">
+              <hr className="w-[calc(100%+3rem)] border-white/10 h-px" />
+              <div className="relative z-20 h-4 w-[calc(100%+3rem)] mx-auto -translate-x-1/2 left-1/2 bg-[repeating-linear-gradient(-45deg,#ffffff,#ffffff_1px,transparent_1px,transparent_6px)] opacity-[7%]" />
+              <hr className="w-[calc(100%+3rem)] border-white/10 h-px" />
+            </div>
+
+            <div className="space-y-6 mt-4">
+              <div className="flex items-center gap-3">
+                <SessionDeviceIcon
+                  userAgent={selectedSession.userAgent}
+                  className="h-14 w-14 bg-white/10"
+                  iconClassName="h-7 w-7 text-white"
+                />
+                <div className="space-y-1">
+                  <div className="text-white font-medium leading-tight flex items-center gap-2">
+                    <span>Session {selectedSession.id.slice(0, 8)}...</span>
+                    <CopyableId id={selectedSession.id} variant="subscript" nonSliced />
+                  </div>
+                  <div className="text-sm text-gray-400">{selectedSession.userId}</div>
+                </div>
+              </div>
+
+              <div className="space-y-2 text-sm">
+                {[
+                  {
+                    label: "Status",
+                    value: new Date(selectedSession.expiresAt) > new Date() ? "Active" : "Expired",
+                  },
+                  ...(selectedDeviceInfo
+                    ? [
+                        {
+                          label: "Device",
+                          value: selectedDeviceInfo.device.label,
+                        },
+                        {
+                          label: "Operating system",
+                          value: [selectedDeviceInfo.os.label, selectedDeviceInfo.os.version]
+                            .filter(Boolean)
+                            .join(" "),
+                        },
+                        {
+                          label: "Browser",
+                          value: [
+                            selectedDeviceInfo.browser.label,
+                            selectedDeviceInfo.browser.version,
+                          ]
+                            .filter(Boolean)
+                            .join(" "),
+                        },
+                        ...(selectedDeviceInfo.vendor
+                          ? [{ label: "Manufacturer", value: selectedDeviceInfo.vendor }]
+                          : []),
+                        ...(selectedDeviceInfo.model
+                          ? [{ label: "Model", value: selectedDeviceInfo.model }]
+                          : []),
+                      ]
+                    : []),
+                  ...(selectedSession.ipAddress
+                    ? [
+                        {
+                          label: "IP",
+                          value: selectedSession.ipAddress,
+                        },
+                        {
+                          label: "Location",
+                          value: sessionLocations[selectedSession.id]
+                            ? `${sessionLocations[selectedSession.id].city}, ${sessionLocations[selectedSession.id].region}, ${sessionLocations[selectedSession.id].country} ${sessionLocations[selectedSession.id].countryCode ? getCountryFlag(sessionLocations[selectedSession.id].countryCode) : ""}`.trim()
+                            : "Resolving...",
+                        },
+                      ]
+                    : []),
+                  {
+                    label: "Expires",
+                    value: format(new Date(selectedSession.expiresAt), "dd MMM yyyy, HH:mm"),
+                  },
+                  {
+                    label: "Created",
+                    value: format(new Date(selectedSession.createdAt), "dd MMM yyyy, HH:mm"),
+                  },
+                  {
+                    label: "Updated",
+                    value: format(new Date(selectedSession.updatedAt), "dd MMM yyyy, HH:mm"),
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.label}
+                    className="flex items-center justify-between border border-dashed border-white/15 bg-black/90 px-3 py-2 rounded-none"
+                  >
+                    <div className="text-[11px] font-mono font-light uppercase tracking-wide text-gray-400">
+                      {item.label}
+                    </div>
+                    <div className="text-[10px] font-mono uppercase text-white text-right break-words max-w-[60%]">
+                      {item.value}
+                    </div>
+                  </div>
+                ))}
+                <div className="border border-dashed border-white/15 bg-black/90 px-3 py-2 rounded-none">
+                  <div className="text-[11px] font-mono font-light uppercase tracking-wide text-gray-400">
+                    User agent
+                  </div>
+                  <div className="mt-2 break-all font-mono text-[10px] leading-relaxed text-white/80">
+                    {selectedSession.userAgent || "Not recorded"}
+                  </div>
+                </div>
+                <div className="mt-2">
+                  <CopyableId id={selectedSession.id} variant="detail" />
+                </div>
+                <div>
+                  <CopyableId id={selectedSession.userId} label="User ID" variant="detail" />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end mt-8">
+              <Button
+                onClick={() => setShowViewModal(false)}
+                className="border border-white/20 bg-white text-black hover:bg-white/90 rounded-none font-mono uppercase font-medium text-xs tracking-tight"
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

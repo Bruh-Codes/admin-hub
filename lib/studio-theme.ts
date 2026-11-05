@@ -38,7 +38,7 @@ div.h-screen > div[class*="bg-black/70"][class*="shrink-0"]:first-child,
 div.min-h-screen > div[class*="bg-black/70"][class*="shrink-0"]:first-child { display: none !important; }
 /* Studio tab bar: edge to edge, tabs share the width, no scrollbar. */
 @media (min-width: 768px) {
-  div[class*="md:flex-row"][class*="md:flex-wrap"][class*="overflow-x-auto"]:has(> div[class*="min-w-fit"]) { flex-wrap: nowrap !important; gap: 16px !important; justify-content: space-between !important; padding-right: 120px !important; }
+  div[class*="md:flex-row"][class*="md:flex-wrap"][class*="overflow-x-auto"]:has(> div[class*="min-w-fit"]) { flex-wrap: nowrap !important; gap: 16px !important; justify-content: space-between !important; }
   div[class*="md:flex-row"][class*="md:flex-wrap"][class*="overflow-x-auto"] > div[class*="min-w-fit"] { min-width: 0 !important; flex: 0 1 auto; }
 }
 @media (min-width: 768px) and (max-width: 1279px) {

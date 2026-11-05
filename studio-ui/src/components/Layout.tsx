@@ -1,0 +1,930 @@
+import {
+  Activity,
+  Building2,
+  Database,
+  LayoutDashboard,
+  LogOut,
+  Mail,
+  Menu,
+  Moon,
+  RefreshCw,
+  Search,
+  Settings,
+  Share2,
+  Sun,
+  User,
+  Users,
+  Wrench,
+  X,
+} from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { assetPath } from "@/lib/utils";
+import { getVisibleToolsCount } from "@/lib/studio-tools";
+import { ExportAnalyticsModal } from "./ExportAnalyticsModal";
+import { useCounts } from "../contexts/CountsContext";
+import { useTheme } from "../contexts/ThemeContext";
+import { useWebSocket } from "../hooks/useWebSocket";
+import { buildApiUrl } from "../utils/api";
+import { fetchStudioAuthJson } from "../utils/studio-auth";
+import CommandPalette from "./CommandPalette";
+import { EntityAvatar } from "./EntityAvatar";
+import { LiveEventMarquee } from "./LiveEventMarquee";
+
+interface UserProfile {
+  id: string;
+  email: string;
+  name?: string;
+  image?: string | null;
+  role?: string;
+}
+
+function getStudioConfig() {
+  return (window as any).__STUDIO_CONFIG__ || {};
+}
+
+function checkIsSelfHosted(): boolean {
+  const cfg = getStudioConfig();
+  return !!cfg.basePath;
+}
+
+interface LayoutProps {
+  children: ReactNode;
+}
+
+type WatchIndicatorStatus =
+  | "connecting"
+  | "watching"
+  | "refreshing"
+  | "up_to_date"
+  | "error"
+  | "unavailable"
+  | "reconnecting";
+
+interface WatchIndicatorState {
+  status: WatchIndicatorStatus;
+  fileName?: string;
+  updatedAt?: number;
+}
+
+const watchStatusMeta: Record<
+  WatchIndicatorStatus,
+  { label: string; textClass: string; dotClass: string; animate?: string }
+> = {
+  connecting: {
+    label: "Connecting",
+    textClass: "text-amber-200 border-amber-400/40",
+    dotClass: "bg-amber-300",
+    animate: "animate-pulse",
+  },
+  watching: {
+    label: "Watching",
+    textClass: "text-emerald-200 border-emerald-400/40",
+    dotClass: "bg-emerald-300",
+  },
+  refreshing: {
+    label: "Refreshing",
+    textClass: "text-amber-200 border-amber-400/40",
+    dotClass: "bg-amber-300",
+    animate: "animate-pulse",
+  },
+  up_to_date: {
+    label: "Up-to-date",
+    textClass: "text-emerald-200 border-emerald-400/40",
+    dotClass: "bg-emerald-300",
+  },
+  error: {
+    label: "Reload Failed",
+    textClass: "text-red-200 border-red-500/50",
+    dotClass: "bg-red-400",
+    animate: "animate-pulse",
+  },
+  unavailable: {
+    label: "Watch Off",
+    textClass: "text-gray-300 border-gray-500/40",
+    dotClass: "bg-gray-400",
+  },
+  reconnecting: {
+    label: "Reconnecting",
+    textClass: "text-amber-200 border-amber-400/40",
+    dotClass: "bg-amber-300",
+    animate: "animate-pulse",
+  },
+};
+
+function normalizeStudioStatus(status?: string): WatchIndicatorStatus {
+  switch (status) {
+    case "refreshing":
+      return "refreshing";
+    case "error":
+      return "error";
+    case "up_to_date":
+    case "watching":
+      return "up_to_date";
+    default:
+      return "watching";
+  }
+}
+
+const EMAIL_TEMPLATES_COUNT = 6;
+
+export default function Layout({ children }: LayoutProps) {
+  const location = useLocation();
+  const { counts, loading } = useCounts();
+  const { theme, toggleTheme } = useTheme();
+  const navigate = useNavigate();
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [showExportAnalytics, setShowExportAnalytics] = useState(false);
+  const [studioVersion, setStudioVersion] = useState("v1.0.0");
+  const [watchState, setWatchState] = useState<WatchIndicatorState>({
+    status: "connecting",
+  });
+  const [schemaCount, setSchemaCount] = useState<number | null>(null);
+  const pendingRefreshRef = useRef(false);
+  const refreshRecoveryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingHardRefreshRef = useRef(false);
+
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isSelfHosted, setIsSelfHosted] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
+  const nextThemeLabel = theme === "dark" ? "Light" : "Dark";
+  const ThemeIcon = theme === "dark" ? Sun : Moon;
+
+  useEffect(() => {
+    setIsSelfHosted(checkIsSelfHosted());
+  }, []);
+
+  const clearRecoveryTimeout = () => {
+    if (refreshRecoveryTimeoutRef.current) {
+      clearTimeout(refreshRecoveryTimeoutRef.current);
+      refreshRecoveryTimeoutRef.current = null;
+    }
+  };
+
+  const scheduleRecoveryTimeout = () => {
+    clearRecoveryTimeout();
+    refreshRecoveryTimeoutRef.current = setTimeout(() => {
+      pendingRefreshRef.current = false;
+      setWatchState((prev) => ({
+        ...prev,
+        status: "up_to_date",
+        updatedAt: Date.now(),
+      }));
+    }, 4000);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setIsCommandPaletteOpen(true);
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!isSelfHosted) return;
+    const controller = new AbortController();
+
+    const fetchUserProfile = async () => {
+      try {
+        const { data } = await fetchStudioAuthJson("/session", { signal: controller.signal });
+        if (data.authenticated && data.user) {
+          const sessionUser = data.user as UserProfile;
+          let profile = sessionUser;
+
+          try {
+            const response = await fetch(buildApiUrl(`/api/users/${sessionUser.id}`), {
+              credentials: "include",
+              signal: controller.signal,
+            });
+            if (response.ok) {
+              const userData = await response.json();
+              profile = { ...sessionUser, image: userData.user?.image ?? null };
+            }
+          } catch {
+            // The session profile remains usable when the optional image lookup fails.
+          }
+
+          if (!controller.signal.aborted) setUserProfile(profile);
+        }
+      } catch {
+        if (!controller.signal.aborted) setUserProfile(null);
+      }
+    };
+
+    fetchUserProfile();
+    return () => controller.abort();
+  }, [isSelfHosted]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
+        setIsProfileOpen(false);
+      }
+    };
+
+    if (isProfileOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isProfileOpen]);
+
+  const handleLogout = async () => {
+    try {
+      await fetchStudioAuthJson("/logout", { method: "GET" });
+      navigate("/login");
+    } catch {
+      navigate("/login");
+    }
+  };
+
+  const getInitials = (name?: string, email?: string): string => {
+    if (name) {
+      return name
+        .split(" ")
+        .map((n) => n[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2);
+    }
+    if (email) {
+      return email[0].toUpperCase();
+    }
+    return "?";
+  };
+
+  useEffect(() => {
+    const fetchVersion = async () => {
+      try {
+        const response = await fetch("/api/config");
+        const data = await response.json();
+        if (data.studio?.version) {
+          setStudioVersion(`v${data.studio.version}`);
+        }
+      } catch (_error) {}
+    };
+
+    const fetchSchemaCount = async () => {
+      try {
+        const response = await fetch("/api/database/schema");
+        const data = await response.json();
+        if (data.success) {
+          if (typeof data.summary?.tableCount === "number") {
+            setSchemaCount(data.summary.tableCount);
+            return;
+          }
+
+          if (data.schema && data.schema.tables) {
+            setSchemaCount(data.schema.tables.length);
+          }
+        }
+      } catch (_error) {
+        setSchemaCount(null);
+      }
+    };
+
+    fetchVersion();
+    fetchSchemaCount();
+
+    return () => {
+      clearRecoveryTimeout();
+    };
+  }, []);
+
+  const handleHardRefresh = () => {
+    pendingRefreshRef.current = false;
+    pendingHardRefreshRef.current = false;
+    clearRecoveryTimeout();
+    setWatchState((prev) => ({
+      ...prev,
+      status: "refreshing",
+      updatedAt: Date.now(),
+    }));
+    window.location.reload();
+  };
+
+  useWebSocket(
+    (message) => {
+      if (message.type === "studio_status") {
+        const nextStatus = normalizeStudioStatus(message.status);
+        if (nextStatus === "up_to_date") {
+          pendingRefreshRef.current = false;
+          clearRecoveryTimeout();
+        }
+        setWatchState((prev) => ({
+          status: nextStatus,
+          fileName: message.fileName || prev.fileName,
+          updatedAt: message.updatedAt || Date.now(),
+        }));
+        return;
+      }
+
+      if (message.type === "config_change_detected") {
+        pendingRefreshRef.current = true;
+        scheduleRecoveryTimeout();
+        setWatchState((prev) => ({
+          ...prev,
+          status: "refreshing",
+          fileName: message.fileName || prev.fileName,
+          updatedAt: Date.now(),
+        }));
+        if (!pendingHardRefreshRef.current) {
+          pendingHardRefreshRef.current = true;
+          setTimeout(() => {
+            handleHardRefresh();
+          }, 200);
+        }
+        return;
+      }
+
+      if (message.type === "config_changed") {
+        pendingRefreshRef.current = false;
+        clearRecoveryTimeout();
+        setWatchState((prev) => ({
+          ...prev,
+          status: "up_to_date",
+          fileName: message.fileName || prev.fileName,
+          updatedAt: message.changedAt || Date.now(),
+        }));
+        return;
+      }
+
+      if (message.type === "connected") {
+        pendingRefreshRef.current = false;
+        clearRecoveryTimeout();
+        setWatchState((prev) => ({
+          ...prev,
+          status: "up_to_date",
+          updatedAt: Date.now(),
+        }));
+      }
+    },
+    {
+      onStatusChange: (status) => {
+        setWatchState((prev) => {
+          if (prev.status === "refreshing" && status !== "unavailable" && status !== "open") {
+            return prev;
+          }
+
+          switch (status) {
+            case "connecting":
+              return { ...prev, status: "connecting" };
+            case "open":
+              clearRecoveryTimeout();
+              return pendingRefreshRef.current
+                ? prev
+                : { ...prev, status: "watching", updatedAt: Date.now() };
+            case "reconnecting":
+            case "closed":
+              return { ...prev, status: "reconnecting" };
+            case "error":
+              return { ...prev, status: "error" };
+            case "unavailable":
+              pendingRefreshRef.current = false;
+              clearRecoveryTimeout();
+              return { ...prev, status: "unavailable" };
+            default:
+              return prev;
+          }
+        });
+      },
+    },
+  );
+
+  const statusMeta = watchStatusMeta[watchState.status];
+
+  const formatCount = (count: number): string => {
+    if (count >= 1000) {
+      return `${(count / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+    }
+    return count.toString();
+  };
+
+  const [eventsEnabled, setEventsEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const checkEventsStatus = async () => {
+      if (!isSelfHosted) {
+        setEventsEnabled(false);
+        return;
+      }
+
+      try {
+        const response = await fetch(buildApiUrl("/api/events/status"));
+        const data = await response.json();
+        setEventsEnabled(data?.enabled === true);
+      } catch (error) {
+        console.error("Failed to check events status:", error);
+        setEventsEnabled(false);
+      }
+    };
+
+    checkEventsStatus();
+  }, [isSelfHosted]);
+
+  const navigation = [
+    { name: "Dashboard", href: "/", icon: LayoutDashboard },
+    {
+      name: "Users",
+      href: "/users",
+      icon: Users,
+      badge: loading ? "..." : formatCount(counts.users),
+    },
+    {
+      name: "Organizations",
+      href: "/organizations",
+      icon: Building2,
+      badge: loading ? "..." : formatCount(counts.organizations),
+    },
+    ...(eventsEnabled === true
+      ? [
+          {
+            name: "Events",
+            href: "/events",
+            icon: Activity,
+          },
+        ]
+      : []),
+    {
+      name: "Database",
+      href: "/database",
+      icon: Database,
+      badge: schemaCount !== null ? formatCount(schemaCount) : undefined,
+    },
+    {
+      name: "Emails",
+      href: "/emails",
+      icon: Mail,
+      badge: formatCount(EMAIL_TEMPLATES_COUNT),
+    },
+    {
+      name: "Tools",
+      href: "/tools",
+      icon: Wrench,
+      badge: formatCount(getVisibleToolsCount(getStudioConfig())),
+    },
+    { name: "Settings", href: "/settings", icon: Settings },
+  ];
+
+  const config = getStudioConfig();
+  const metadata = config?.metadata || {};
+  const logoUrl = metadata.logo
+    ? metadata.logo.startsWith("http://") || metadata.logo.startsWith("https://")
+      ? metadata.logo
+      : assetPath(metadata.logo)
+    : assetPath("/logo.png");
+  const companyName = metadata.company?.name || "Better-Auth Studio.";
+  const companyWebsite = metadata.company?.website;
+
+  const isDashboardRoute = location.pathname === "/";
+
+  return (
+    <div
+      className={
+        isDashboardRoute
+          ? "h-screen min-h-0 overflow-hidden bg-black flex flex-col"
+          : "min-h-screen bg-black"
+      }
+    >
+      <div className="bg-black/70 border-b border-white/15 shrink-0">
+        <div className="flex items-center justify-between px-3 py-3 md:px-6 md:py-4">
+          <div className="flex items-center space-x-4 min-w-0">
+            <div className="flex items-center justify-end space-x-2 min-w-0">
+              <img
+                src={logoUrl}
+                alt="Logo"
+                className="w-8 h-8 md:w-10 md:h-10 object-contain flex-shrink-0"
+              />
+              {companyWebsite ? (
+                <a
+                  href={companyWebsite}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mb-0 cursor-pointer hover:opacity-80 transition-opacity min-w-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  <h1 className="text-sm md:text-md inline-flex pt-2 mb-0 items-start font-light font-mono uppercase text-white gap-2 truncate">
+                    <span className="truncate">{companyName}</span>
+                    <sup className="text-xs text-gray-400 ml-1 mt-0 hidden md:flex items-center space-x-2">
+                      <span className="inline-flex items-center">
+                        <span className="mr-1">[</span>
+                        <span className="text-white/80 lowercase font-mono text-xs">
+                          {studioVersion}
+                        </span>
+                        <span className="ml-1">]</span>
+                      </span>
+                      <span className="inline-flex items-center">
+                        <span className="mr-1">[</span>
+                        <span className="text-white/80 font-mono text-xs">PUBLIC BETA</span>
+                        <span className="ml-1">]</span>
+                      </span>
+                      <span
+                        className={`inline-flex items-center rounded border px-1.5 py-0.5 font-normal uppercase tracking-wide text-[9px] ${statusMeta.textClass} ${statusMeta.animate ?? ""}`}
+                      >
+                        <span
+                          className={`mr-1 h-1.5 w-1.5 rounded-full ${statusMeta.dotClass}`}
+                        ></span>
+                        {statusMeta.label}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleHardRefresh();
+                        }}
+                        aria-label="Hard refresh studio"
+                        className="ml-1 inline-flex items-center rounded border border-dashed border-white/20 p-0.5 text-white/70 transition hover:text-white hover:border-white/50"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowExportAnalytics(true);
+                        }}
+                        aria-label="Export analytics"
+                        className="ml-1 inline-flex items-center rounded border border-dashed border-white/20 p-0.5 text-white/70 transition hover:text-white hover:border-white/50"
+                      >
+                        <Share2 className="h-3.5 w-3.5" />
+                      </button>
+                    </sup>
+                  </h1>
+                </a>
+              ) : (
+                <div className="mb-0 cursor-pointer min-w-0" onClick={() => navigate("/")}>
+                  <h1 className="text-sm md:text-md inline-flex mb-0 items-start font-light pt-2 font-mono uppercase text-white gap-2 truncate">
+                    <span className="truncate">{companyName}</span>
+                    <sup className="text-xs text-gray-400 ml-1 mt-0 hidden md:flex items-center space-x-2">
+                      <span className="inline-flex items-center">
+                        <span className="mr-1">[</span>
+                        <span className="text-white/80 lowercase font-mono text-xs">
+                          {studioVersion}
+                        </span>
+                        <span className="ml-1">]</span>
+                      </span>
+                      <span className="inline-flex items-center">
+                        <span className="mr-1">[</span>
+                        <span className="text-white/80 font-mono text-xs">PUBLIC BETA</span>
+                        <span className="ml-1">]</span>
+                      </span>
+                      <span
+                        className={`inline-flex items-center rounded border px-1.5 py-0.5 font-normal uppercase tracking-wide text-[9px] ${statusMeta.textClass} ${statusMeta.animate ?? ""}`}
+                      >
+                        <span
+                          className={`mr-1 h-1.5 w-1.5 rounded-full ${statusMeta.dotClass}`}
+                        ></span>
+                        {statusMeta.label}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleHardRefresh}
+                        aria-label="Hard refresh studio"
+                        className="ml-1 inline-flex items-center rounded border border-dashed border-white/20 p-0.5 text-white/70 transition hover:text-white hover:border-white/50"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowExportAnalytics(true)}
+                        aria-label="Export analytics"
+                        className="ml-1 inline-flex items-center rounded border border-dashed border-white/20 p-0.5 text-white/70 transition hover:text-white hover:border-white/50"
+                      >
+                        <Share2 className="h-3.5 w-3.5" />
+                      </button>
+                    </sup>
+                  </h1>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center space-x-3 md:space-x-4 flex-shrink-0">
+            <a
+              href="https://better-auth.studio"
+              target="_blank"
+              rel="noopener"
+              className="group hidden md:flex items-center"
+            >
+              <span className="text-white/70 text-xs mr-2 transition-colors duration-150 group-hover:text-white group-hover:bg-gray-500/20 rounded px-0.5">
+                [
+              </span>
+              <span className="text-white/80 font-mono text-sm uppercase">Docs</span>
+              <span className="text-white/70 text-xs ml-2 transition-colors duration-150 group-hover:text-white group-hover:bg-gray-500/20 rounded px-0.5">
+                ]
+              </span>
+            </a>
+            <a
+              href="https://better-auth.studio"
+              target="_blank"
+              rel="noopener"
+              className="group hidden md:flex items-center"
+            >
+              <span className="text-white/70 text-xs mr-2 transition-colors duration-150 group-hover:text-white group-hover:bg-gray-500/20 rounded px-0.5">
+                [
+              </span>
+              <span className="text-white/80 font-mono text-sm uppercase">Support</span>
+              <span className="text-white/70 text-xs ml-2 transition-colors duration-150 group-hover:text-white group-hover:bg-gray-500/20 rounded px-0.5">
+                ]
+              </span>
+            </a>
+            <div className="relative font-mono uppercase text-xs hidden sm:block">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-3 h-3" />
+              <input
+                type="text"
+                placeholder="SEARCH..."
+                onClick={() => setIsCommandPaletteOpen(true)}
+                className="pl-10 pr-4 py-2  bg-black border rounded-none border-gray-600 text-white border-dashed border-white/20 focus:ring-2 focus:ring-white focus:border-transparent transition-colors placeholder-gray-400 cursor-pointer"
+                readOnly
+              />
+              <kbd className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-400 border border-dashed border-white/10 rounded-sm px-1.5 py-0.5">
+                ⌘ K
+              </kbd>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsCommandPaletteOpen(true)}
+              className="sm:hidden w-9 h-9 border border-dashed border-white/20 bg-black flex items-center justify-center text-white/70 hover:text-white hover:border-white/50 transition-colors"
+              aria-label="Search"
+            >
+              <Search className="w-4 h-4" />
+            </button>
+
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="inline-flex h-9 w-9 items-center justify-center border border-dashed border-white/20 bg-black text-white/70 hover:text-white hover:border-white/50 transition-colors"
+              aria-label={`Switch to ${nextThemeLabel.toLowerCase()} mode`}
+              title={`Switch to ${nextThemeLabel.toLowerCase()} mode`}
+            >
+              <ThemeIcon className="h-4 w-4" />
+            </button>
+
+            {isSelfHosted && userProfile && (
+              <div className="relative h-full" ref={profileRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsProfileOpen(!isProfileOpen)}
+                  className="w-9 h-9 md:w-10 md:h-10 border border-dashed border-white/30 bg-black flex items-center justify-center hover:border-white/50 transition-colors overflow-hidden"
+                  aria-label={isProfileOpen ? "Close profile menu" : "Open profile menu"}
+                  aria-expanded={isProfileOpen}
+                  aria-controls="studio-profile-panel"
+                >
+                  <EntityAvatar
+                    src={userProfile.image}
+                    alt=""
+                    className="w-full h-full"
+                    fallback={
+                      <span className="text-white text-xs font-mono uppercase">
+                        {getInitials(userProfile.name, userProfile.email)}
+                      </span>
+                    }
+                  />
+                </button>
+
+                {isProfileOpen && (
+                  <div
+                    id="studio-profile-panel"
+                    className="absolute right-0 top-full mt-2 w-64 border border-dashed border-white/20 bg-black z-50"
+                  >
+                    <div className="p-4">
+                      <div className="flex items-center gap-3">
+                        <EntityAvatar
+                          src={userProfile.image}
+                          alt=""
+                          className="w-10 h-10 border border-dashed border-white/30 bg-black"
+                          fallback={<User className="w-5 h-5 text-white/50" />}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-white text-[11px] font-mono uppercase truncate">
+                            {userProfile.name || "User"}
+                            {userProfile.role && (
+                              <span className="inline-flex ml-2 mt-1 text-[9px] tracking-wider font-mono uppercase text-white/60 border border-dashed border-white/20 px-1.5 py-0.5">
+                                {userProfile.role}
+                              </span>
+                            )}
+                          </p>
+                          <p className="text-white/40 text-xs font-mono truncate">
+                            {userProfile.email}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-center justify-center">
+                      <hr className="w-full border-white/10 h-px" />
+                      <div className="relative z-20 h-5 w-full bg-[repeating-linear-gradient(-45deg,#ffffff,#ffffff_1px,transparent_1px,transparent_6px)] opacity-[5%]" />
+                      <hr className="w-full border-white/10 h-px" />
+                    </div>
+
+                    <div className="">
+                      <Link
+                        to="/settings"
+                        onClick={() => setIsProfileOpen(false)}
+                        className="flex items-center gap-3 px-3 py-3 text-white/70 hover:text-white hover:bg-white/5 transition-colors"
+                      >
+                        <Settings className="w-4 h-4" />
+                        <span className="text-xs font-mono uppercase">Settings</span>
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={handleLogout}
+                        className="w-full flex items-center gap-3 px-3 py-3 text-red-400/70 hover:text-red-400 hover:bg-red-500/5 transition-colors"
+                      >
+                        <LogOut className="w-4 h-4" />
+                        <span className="text-xs font-mono uppercase">Logout</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="md:hidden w-9 h-9 border border-dashed border-white/20 bg-black flex items-center justify-center text-white/70 hover:text-white hover:border-white/50 transition-colors"
+              aria-label="Toggle menu"
+            >
+              {isMobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {isMobileMenuOpen && (
+        <div className="md:hidden bg-black border-b border-white/15 z-40 shrink-0">
+          <nav className="flex flex-col">
+            {navigation.map((item) => {
+              const isActive =
+                item.href === "/"
+                  ? location.pathname === "/"
+                  : location.pathname === item.href ||
+                    location.pathname.startsWith(item.href + "/");
+              return (
+                <Link
+                  key={item.name}
+                  to={item.href}
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className={`flex items-center space-x-3 px-4 py-3 text-sm font-medium border-b border-white/5 transition-all duration-200 ${
+                    isActive
+                      ? "text-white bg-white/5 border-l-2 border-l-white"
+                      : "text-gray-400 hover:text-white hover:bg-white/5"
+                  }`}
+                >
+                  <item.icon className="w-4 h-4 flex-shrink-0" />
+                  <span className="font-mono uppercase font-light text-xs">{item.name}</span>
+                  {item.badge && (
+                    <span className="text-xs text-gray-500 ml-auto">
+                      <span className="mr-0.5">[</span>
+                      <span className="text-white/80 lowercase font-mono text-xs">
+                        {item.badge}
+                      </span>
+                      <span className="ml-0.5">]</span>
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-white/5">
+              <a
+                href="https://better-auth.studio/docs"
+                target="_blank"
+                rel="noopener"
+                className="text-white/80 font-mono text-xs uppercase hover:text-white"
+              >
+                [Docs]
+              </a>
+              <a
+                href="https://better-auth.com/docs"
+                target="_blank"
+                rel="noopener"
+                className="text-white/80 font-mono text-xs uppercase hover:text-white"
+              >
+                [Support]
+              </a>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                toggleTheme();
+                setIsMobileMenuOpen(false);
+              }}
+              className="flex items-center justify-between px-4 py-3 text-sm font-medium border-b border-white/5 text-gray-400 hover:text-white hover:bg-white/5 transition-all duration-200"
+            >
+              <span className="inline-flex items-center gap-3">
+                <ThemeIcon className="w-4 h-4 flex-shrink-0" />
+                <span className="font-mono uppercase font-light text-xs">
+                  Switch to {nextThemeLabel}
+                </span>
+              </span>
+            </button>
+          </nav>
+        </div>
+      )}
+
+      <div className="bg-black/50 border-b border-white/15 hidden md:block shrink-0">
+        <div className="px-6">
+          <nav className="flex overflow-y-hidden overflow-x-auto">
+            {navigation.map((item, index) => {
+              const isActive =
+                item.href === "/"
+                  ? location.pathname === "/"
+                  : location.pathname === item.href ||
+                    location.pathname.startsWith(item.href + "/");
+              return (
+                <div key={item.name} className="flex items-center">
+                  {index === 0 && (
+                    <div className="h-[50px] -my-5 w-px bg-transparent border-dashed border-r border-white/20" />
+                  )}
+                  <Link
+                    to={item.href}
+                    className={`flex items-center space-x-2 border-x-0 px-8 py-4 text-sm font-medium border-b-2 transition-all duration-200 relative ${
+                      isActive
+                        ? "border-white text-white"
+                        : "border-transparent text-gray-400 hover:text-white hover:border-gray-500/50"
+                    }`}
+                  >
+                    <item.icon className="w-4 h-4" />
+                    <span className="inline-flex font-mono uppercase border-x-0 font-light text-xs items-start">
+                      {item.name}
+                      {item.badge && (
+                        <sup className="text-xs text-gray-500 ml-1">
+                          <span className="mr-0.5">[</span>
+                          <span className="text-white/80 lowercase font-mono text-xs">
+                            {item.badge}
+                          </span>
+                          <span className="ml-0.5">]</span>
+                        </sup>
+                      )}
+                    </span>
+                  </Link>
+                  {index <= navigation.length - 1 && (
+                    <div className="h-[50px] -my-5 w-px bg-transparent border-dashed border-r border-white/20" />
+                  )}
+                </div>
+              );
+            })}
+          </nav>
+        </div>
+      </div>
+
+      {location.pathname === "/" &&
+        (() => {
+          const config = getStudioConfig();
+          const liveMarqueeConfig = config?.liveMarquee;
+          const liveMarqueeEnabled = liveMarqueeConfig?.enabled !== false;
+
+          const pollInterval = liveMarqueeConfig?.pollInterval ?? 2000;
+          const speed = liveMarqueeConfig?.speed ?? 0.5;
+          const pauseOnHover = liveMarqueeConfig?.pauseOnHover ?? true;
+          const limit = liveMarqueeConfig?.limit ?? 50;
+          const sort = liveMarqueeConfig?.sort ?? "desc";
+          const colors = liveMarqueeConfig?.colors;
+          return eventsEnabled === true && liveMarqueeEnabled && isSelfHosted ? (
+            <div className="shrink-0">
+              <LiveEventMarquee
+                maxEvents={limit}
+                pollInterval={pollInterval}
+                speed={speed}
+                pauseOnHover={pauseOnHover}
+                sort={sort}
+                colors={colors}
+              />
+            </div>
+          ) : null;
+        })()}
+
+      <div
+        className={`flex-1 ${isDashboardRoute ? "min-h-0 overflow-hidden" : ""} ${
+          !config.liveMarquee ? "mt-4" : ""
+        }`}
+      >
+        {children}
+      </div>
+
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        onAction={(action) => {
+          if (action === "exportAnalytics") setShowExportAnalytics(true);
+          if (action === "hardRefresh") handleHardRefresh();
+        }}
+      />
+      {showExportAnalytics && (
+        <ExportAnalyticsModal
+          defaultMode="overview"
+          onClose={() => setShowExportAnalytics(false)}
+        />
+      )}
+    </div>
+  );
+}
