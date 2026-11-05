@@ -19,4 +19,22 @@ body, button, input, select, textarea { font-family: "Geist", ui-sans-serif, sys
    which made its text tiny. Lay it out at real size instead. */
 div[style*="transform-origin: left top"][style*="scale("], div[style*="transform-origin: top left"][style*="scale("] { transform: none !important; width: 100% !important; }
 div:has(> div[style*="transform-origin: left top"][style*="scale("]), div:has(> div[style*="transform-origin: top left"][style*="scale("]) { width: 100% !important; height: auto !important; overflow: visible !important; }
+/* That canvas sat in a fixed-height, overflow-hidden box: let it scroll. */
+div.w-full:has(> div > div[style*="scale("]) { height: auto !important; }
+div:has(> div.w-full > div > div[style*="scale("]) { overflow-y: auto !important; }
+/* Widgets panel: its own solid surface, and a toggle that stays opaque on hover
+   (it overlaps the tab bar, so a see-through hover showed the tabs behind it). */
+div[class*="backdrop-blur-md"][class*="z-30"][class*="right-0"] { background: #141414 !important; backdrop-filter: none !important; border-left-color: #2e2e2e !important; }
+button[title="Collapse panel"], button[title="Expand widgets panel"] { background: #141414 !important; border-color: #3a3a3a !important; color: #d4d4d4 !important; }
+button[title="Collapse panel"]:hover, button[title="Expand widgets panel"]:hover { background: #262626 !important; color: #fff !important; }
+div[class*="backdrop-blur-md"][class*="z-30"][class*="right-0"] div[draggable="true"] { background: #1b1b1b !important; }
+/* The widget picker previews are made-up sample rows (Alice Chen, Acme Corp...): show names only. */
+div[class*="backdrop-blur-md"][class*="z-30"][class*="right-0"] div[draggable="true"] > :not([class*="px-2.5"][class*="py-1.5"]) { display: none !important; }
+div[class*="backdrop-blur-md"][class*="z-30"][class*="right-0"] div[draggable="true"] > [class*="px-2.5"][class*="py-1.5"] { border-bottom: 0 !important; padding-top: 12px !important; padding-bottom: 12px !important; }
+/* Thin, quiet scrollbars. */
+* { scrollbar-width: thin !important; scrollbar-color: #3f3f46 transparent !important; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: #52525b; }
 </style>`;

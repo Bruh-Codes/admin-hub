@@ -5,6 +5,7 @@ import { getMembership } from "@/lib/hub/projects";
 import { mintStudioSession, withStudioCookie } from "@/lib/hub/studio-session";
 import { guardStudioRequest } from "@/lib/role-guard";
 import { STUDIO_THEME } from "@/lib/studio-theme";
+import { fixAnalytics } from "@/lib/hub/analytics-fix";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -83,6 +84,20 @@ async function handle(request: Request, { params }: Ctx): Promise<Response> {
 			body: guarded.method === "GET" || guarded.method === "HEAD" ? undefined : await guarded.arrayBuffer(),
 		}),
 	);
+
+	// Real period-over-period ▲/▼ numbers instead of the studio's hour-vs-hour ones.
+	if ((subPath === "/analytics" || subPath === "/api/analytics") && guarded.method === "GET" && response.ok) {
+		const body = await response.json().catch(() => null);
+		if (body) {
+			const fetchTotal = async (type: string, from: Date, to: Date) => {
+				const u = new URL(guarded.url);
+				u.search = new URLSearchParams({ type, period: "Custom", from: from.toISOString(), to: to.toISOString() }).toString();
+				const r = await studio.handler(new Request(u, { method: "GET", headers }));
+				return Number((await r.json().catch(() => ({}))).total ?? 0);
+			};
+			return Response.json(await fixAnalytics(new URL(guarded.url), body, fetchTotal), { headers: { "cache-control": "no-store" } });
+		}
+	}
 
 	// Drop the studio's own session cookie; the hub mints one per request.
 	const out = new Headers(response.headers);
