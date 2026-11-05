@@ -31,6 +31,8 @@ div[class*="backdrop-blur-md"][class*="z-30"][class*="right-0"] div[draggable="t
 /* The widget picker previews are made-up sample rows (Alice Chen, Acme Corp...): show names only. */
 div[class*="backdrop-blur-md"][class*="z-30"][class*="right-0"] div[draggable="true"] > :not([class*="px-2.5"][class*="py-1.5"]) { display: none !important; }
 div[class*="backdrop-blur-md"][class*="z-30"][class*="right-0"] div[draggable="true"] > [class*="px-2.5"][class*="py-1.5"] { border-bottom: 0 !important; padding-top: 12px !important; padding-bottom: 12px !important; }
+/* The studio's own header bar: the hub's top bar carries search, refresh, share and the profile. */
+div.h-screen > div[class*="bg-black/70"][class*="shrink-0"]:first-child { display: none !important; }
 /* Thin, quiet scrollbars. */
 * { scrollbar-width: thin !important; scrollbar-color: #3f3f46 transparent !important; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
