@@ -33,6 +33,12 @@ div[class*="backdrop-blur-md"][class*="z-30"][class*="right-0"] div[draggable="t
 div[class*="backdrop-blur-md"][class*="z-30"][class*="right-0"] div[draggable="true"] > [class*="px-2.5"][class*="py-1.5"] { border-bottom: 0 !important; padding-top: 12px !important; padding-bottom: 12px !important; }
 /* The studio's own header bar: the hub's top bar carries search, refresh, share and the profile. */
 div.h-screen > div[class*="bg-black/70"][class*="shrink-0"]:first-child { display: none !important; }
+/* Studio tab bar: edge to edge, tabs share the width, no scrollbar. */
+div[class*="bg-black/50"][class*="shrink-0"] > div.px-6 { padding-left: 0 !important; padding-right: 0 !important; }
+div[class*="bg-black/50"][class*="shrink-0"] > div.px-6 > nav { scrollbar-width: none !important; }
+div[class*="bg-black/50"][class*="shrink-0"] > div.px-6 > nav::-webkit-scrollbar { display: none !important; }
+div[class*="bg-black/50"][class*="shrink-0"] > div.px-6 > nav > div { flex: 1 1 0 !important; min-width: max-content; }
+div[class*="bg-black/50"][class*="shrink-0"] > div.px-6 > nav > div > a { flex: 1 1 auto !important; justify-content: center !important; padding-left: 20px !important; padding-right: 20px !important; }
 /* Thin, quiet scrollbars. */
 * { scrollbar-width: thin !important; scrollbar-color: #3f3f46 transparent !important; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
