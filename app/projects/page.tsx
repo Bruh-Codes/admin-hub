@@ -1,5 +1,6 @@
 import { Invitations } from "@/components/invitations";
 import { Logo } from "@/components/logo";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { UserMenu } from "@/components/user-menu";
 import { hubOwners } from "@/lib/hub/auth";
 import { pendingInvitesFor } from "@/lib/hub/invites";
@@ -21,6 +22,7 @@ export default async function Projects() {
 			<header className="topbar">
 				<a href="/projects" style={{ textDecoration: "none" }}><Logo /></a>
 				<div style={{ flex: 1 }} />
+				<ThemeToggle />
 				<UserMenu name={user.name} email={user.email} image={user.image} />
 			</header>
 			<main className="page">

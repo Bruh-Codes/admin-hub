@@ -2,6 +2,7 @@ import { Logo } from "@/components/logo";
 import { ProjectSwitcher } from "@/components/project-switcher";
 import { ProjectTabs } from "@/components/project-tabs";
 import { StudioActions } from "@/components/studio-actions";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { UserMenu } from "@/components/user-menu";
 import { hubOwners } from "@/lib/hub/auth";
 import { listMemberships } from "@/lib/hub/projects";
@@ -19,7 +20,10 @@ export default async function ProjectLayout({ children, params }: { children: Re
 				<ProjectSwitcher current={project} projects={projects} canCreate={hubOwners().includes(session.user.email.toLowerCase())} />
 				<ProjectTabs slug={slug} />
 				<div style={{ flex: 1 }} />
-				<StudioActions slug={slug} />
+				<div className="studio-actions">
+					<StudioActions slug={slug} />
+					<ThemeToggle />
+				</div>
 				<UserMenu name={session.user.name} email={session.user.email} image={session.user.image} />
 			</header>
 			<div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>{children}</div>

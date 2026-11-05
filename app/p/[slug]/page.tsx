@@ -25,7 +25,7 @@ export default async function Dashboard({ params }: { params: Promise<{ slug: st
 			id="studio-frame"
 			title={`${project.name} dashboard`}
 			src={studioBasePath(slug)}
-			style={{ border: 0, width: "100%", height: "100%", display: "block", background: "#000" }}
+			style={{ border: 0, width: "100%", height: "100%", display: "block", background: "var(--bg)" }}
 		/>
 	);
 }

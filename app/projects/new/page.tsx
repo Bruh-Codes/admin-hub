@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { Logo } from "@/components/logo";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { UserMenu } from "@/components/user-menu";
 import { hubOwners } from "@/lib/hub/auth";
 import { listMemberships } from "@/lib/hub/projects";
@@ -16,6 +17,7 @@ export default async function NewProjectChooser() {
 			<header className="topbar">
 				<a href="/projects" style={{ textDecoration: "none" }}><Logo /></a>
 				<div style={{ flex: 1 }} />
+				<ThemeToggle />
 				<UserMenu name={user.name} email={user.email} image={user.image} />
 			</header>
 			<main className="page" style={{ maxWidth: 1080 }}>
