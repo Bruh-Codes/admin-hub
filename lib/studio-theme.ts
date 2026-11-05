@@ -34,6 +34,11 @@ div[class*="backdrop-blur-md"][class*="z-30"][class*="right-0"] div[draggable="t
 /* The studio's own header bar: the hub's top bar carries search, refresh, share and the profile. */
 div.h-screen > div[class*="bg-black/70"][class*="shrink-0"]:first-child { display: none !important; }
 /* Studio tab bar: edge to edge, tabs share the width, no scrollbar. */
+@media (max-width: 767px) {
+  div[class*="md:flex-row"][class*="md:flex-wrap"][class*="overflow-x-auto"]:has(> div[class*="min-w-fit"]) { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 14px 12px !important; }
+  div[class*="md:flex-row"][class*="md:flex-wrap"][class*="overflow-x-auto"] > div[class*="min-w-fit"] { min-width: 0 !important; }
+  div[class*="md:flex-row"][class*="md:flex-wrap"][class*="overflow-x-auto"] > div[class*="min-w-fit"] > div:last-child { flex-wrap: wrap; row-gap: 2px; }
+}
 div[class*="bg-black/50"][class*="shrink-0"][class*="hidden"][class*="md:block"] { display: block !important; }
 @media (max-width: 767px) { div[class*="bg-black/50"][class*="shrink-0"] > div.px-6 > nav > div > a { padding: 12px 14px !important; white-space: nowrap; } }
 div[class*="bg-black/50"][class*="shrink-0"] > div.px-6 { padding-left: 0 !important; padding-right: 0 !important; }
