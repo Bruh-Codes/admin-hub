@@ -1,6 +1,8 @@
 "use client";
 
+import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
+import { api, unwrap } from "@/lib/client/api";
 import type { DEFAULT_CONNECTION, redactProjectConnection } from "@/lib/hub/connection";
 import { PluginSteps } from "@/components/plugin-steps";
 import { hubClient } from "@/lib/hub/client";
@@ -43,8 +45,27 @@ export function SettingsClient(props: {
 	const [plugins, setPlugins] = useState(start.plugins);
 	const [userFields, setUserFields] = useState(start.userFields.join(", "));
 	const [roles, setRoles] = useState(start.roles.join(", "));
-	const [busy, setBusy] = useState(false);
 	const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+	// Save tests the connection on the server first; nothing is stored if the test fails.
+	const saveConnection = useMutation({
+		mutationFn: (payload: Record<string, unknown>) =>
+			api<{ users: number }>(`/api/projects/${props.slug}/connection`, { method: "PUT", json: payload }),
+		onMutate: () => setMsg(null),
+		onSuccess: (data) => {
+			setDatabaseUrl("");
+			setAppKey("");
+			setMsg({ ok: true, text: `Connected. Found ${data.users} users. Opening the dashboard…` });
+			window.location.href = `/p/${props.slug}`;
+		},
+		onError: (e) => setMsg({ ok: false, text: e.message || "Could not save." }),
+	});
+	const removeProject = useMutation({
+		mutationFn: () => unwrap<unknown>(hubClient.organization.delete({ organizationId: props.projectId })),
+		onSuccess: () => { window.location.href = "/projects"; },
+		onError: (e) => setMsg({ ok: false, text: e.message || "Could not delete." }),
+	});
+	const busy = saveConnection.isPending || saveConnection.isSuccess;
 	const disabled = !props.canManage || busy;
 
 	function applyPreset(p: Shape) {
@@ -56,33 +77,18 @@ export function SettingsClient(props: {
 		setMsg({ ok: true, text: "Preset applied. Add the database URL and save." });
 	}
 
-	async function save(e: React.FormEvent) {
+	function save(e: React.FormEvent) {
 		e.preventDefault();
-		setBusy(true);
-		setMsg(null);
-		const payload =
+		saveConnection.mutate(
 			mode === "app"
 				? { kind: "app", url: appUrl, basePath, key: appKey }
-				: { kind: "database", databaseUrl, models, idStrategy, plugins, userFields, roles };
-		const res = await fetch(`/api/projects/${props.slug}/connection`, {
-			method: "PUT",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify(payload),
-		});
-		const data = await res.json().catch(() => ({}));
-		setBusy(false);
-		if (!res.ok) return setMsg({ ok: false, text: data.error ?? "Could not save." });
-		setDatabaseUrl("");
-		setAppKey("");
-		setMsg({ ok: true, text: `Connected. Found ${data.users} users. Opening the dashboard…` });
-		window.location.href = `/p/${props.slug}`;
+				: { kind: "database", databaseUrl, models, idStrategy, plugins, userFields, roles },
+		);
 	}
 
-	async function deleteProject() {
+	function deleteProject() {
 		if (!window.confirm(`Delete ${props.projectName} from the hub? Its members lose access. The product's own database is not touched.`)) return;
-		const { error } = await hubClient.organization.delete({ organizationId: props.projectId });
-		if (error) return setMsg({ ok: false, text: error.message ?? "Could not delete." });
-		window.location.href = "/projects";
+		removeProject.mutate();
 	}
 
 	return (
@@ -205,7 +211,7 @@ export function SettingsClient(props: {
 				<section className="card card-pad" style={{ marginTop: 32, borderColor: "#7f1d1d" }}>
 					<h2>Delete project</h2>
 					<p className="muted" style={{ marginTop: 6, marginBottom: 16 }}>Removes the project, its team and its saved connection from the hub. The product's database is not touched.</p>
-					<button type="button" className="btn btn-danger" onClick={deleteProject}>Delete {props.projectName}</button>
+					<button type="button" className="btn btn-danger" disabled={removeProject.isPending} onClick={deleteProject}>{removeProject.isPending ? "Deleting…" : `Delete ${props.projectName}`}</button>
 				</section>
 			) : null}
 		</>

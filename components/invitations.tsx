@@ -1,27 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { unwrap } from "@/lib/client/api";
 import { hubClient } from "@/lib/hub/client";
 
 export type PendingInvite = { id: string; projectName: string; role: string; inviterName: string | null };
 
 export function Invitations({ invites }: { invites: PendingInvite[] }) {
-	const [busy, setBusy] = useState<string | null>(null);
-	const [error, setError] = useState<string | null>(null);
-
-	async function act(id: string, accept: boolean) {
-		setBusy(id);
-		setError(null);
-		const { error } = accept
-			? await hubClient.organization.acceptInvitation({ invitationId: id })
-			: await hubClient.organization.rejectInvitation({ invitationId: id });
-		if (error) {
-			setError(error.message ?? "Something went wrong.");
-			setBusy(null);
-			return;
-		}
-		window.location.reload();
-	}
+	const respond = useMutation({
+		mutationFn: ({ id, accept }: { id: string; accept: boolean }) =>
+			unwrap<unknown>(
+				accept
+					? hubClient.organization.acceptInvitation({ invitationId: id })
+					: hubClient.organization.rejectInvitation({ invitationId: id }),
+			),
+		// The project list is rendered on the server, so reload to show the new project.
+		onSuccess: () => window.location.reload(),
+	});
+	const busy = respond.isPending || respond.isSuccess ? respond.variables?.id : null;
+	const error = respond.error?.message ?? null;
+	const act = (id: string, accept: boolean) => respond.mutate({ id, accept });
 
 	if (invites.length === 0) return null;
 	return (

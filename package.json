@@ -10,6 +10,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.106.1",
     "better-auth": "1.7.3",
     "better-auth-studio": "1.1.5",
     "next": "16.3.4",

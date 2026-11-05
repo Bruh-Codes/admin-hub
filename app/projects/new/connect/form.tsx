@@ -1,6 +1,8 @@
 "use client";
 
+import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { api } from "@/lib/client/api";
 import { CopyBlock } from "@/components/copy-block";
 
 const slugify = (s: string) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
@@ -32,8 +34,17 @@ export function NewProjectForm({ hubUrl }: { hubUrl: string }) {
 	const [keyCopied, setKeyCopied] = useState(false);
 	const [url, setUrl] = useState("");
 	const [basePath, setBasePath] = useState("");
-	const [error, setError] = useState<string | null>(null);
-	const [busy, setBusy] = useState<string | null>(null);
+	// Creating is atomic on the server: if the app can't be reached, no project is saved.
+	const create = useMutation({
+		mutationFn: (body: { name: string; slug: string; connection: Record<string, string> }) =>
+			api<{ slug: string }>("/api/projects", { method: "POST", json: body }),
+		onSuccess: (_d, body) => {
+			try { sessionStorage.removeItem(KEY_STORE); } catch {}
+			window.location.href = `/p/${body.slug}`;
+		},
+	});
+	const busy = create.isPending || create.isSuccess ? "Checking your app and creating the project…" : null;
+	const error = create.error ? create.error.message || "Could not create the project." : null;
 
 	// Keep the generated key across reloads of this tab, so the value already
 	// pasted into the app's env stays valid.
@@ -62,20 +73,9 @@ export function NewProjectForm({ hubUrl }: { hubUrl: string }) {
 		["Connect", "Verify connection", s4],
 	];
 
-	async function submit(e: React.FormEvent) {
+	function submit(e: React.FormEvent) {
 		e.preventDefault();
-		setError(null);
-		const connection = { kind: "app", url: url.trim(), key, basePath: basePath.trim() || "/api/auth" };
-
-		setBusy("Checking your app and creating the project…");
-		const res = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: name.trim(), slug, connection }) });
-		const out = await res.json().catch(() => ({}));
-		if (!res.ok) {
-			setBusy(null);
-			return setError(out.error ?? "Could not create the project.");
-		}
-		try { sessionStorage.removeItem(KEY_STORE); } catch {}
-		window.location.href = `/p/${slug}`;
+		create.mutate({ name: name.trim(), slug, connection: { kind: "app", url: url.trim(), key, basePath: basePath.trim() || "/api/auth" } });
 	}
 
 	return (

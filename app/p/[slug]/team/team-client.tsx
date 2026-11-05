@@ -1,10 +1,10 @@
 "use client";
 
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { api, queryKeys, unwrap } from "@/lib/client/api";
 import { hubClient } from "@/lib/hub/client";
-
-export type Member = { id: string; role: string; userId: string; name: string; email: string; image: string | null };
-export type Invite = { id: string; email: string; role: string; expiresAt: string };
+import type { Member, Team } from "@/lib/hub/team";
 
 const ROLES = [
 	{ value: "member", label: "Member", help: "Read-only: can view users, organizations and sessions." },
@@ -13,31 +13,45 @@ const ROLES = [
 ];
 
 export function TeamClient(props: {
+	slug: string;
 	projectId: string;
 	myRole: string;
 	myUserId: string;
 	canManage: boolean;
-	members: Member[];
-	invites: Invite[];
+	initialTeam: Team;
 	hubUrl: string;
 }) {
 	const { projectId, canManage } = props;
 	const [email, setEmail] = useState("");
 	const [role, setRole] = useState("member");
-	const [busy, setBusy] = useState(false);
 	const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 	// Only owners can hand out the owner role.
 	const roleOptions = ROLES.filter((r) => r.value !== "owner" || props.myRole === "owner");
 
-	async function run(action: () => Promise<{ error: { message?: string } | null }>, okText: string) {
-		setBusy(true);
-		setMsg(null);
-		const { error } = await action();
-		setBusy(false);
-		if (error) return setMsg({ ok: false, text: error.message ?? "Something went wrong." });
-		setMsg({ ok: true, text: okText });
-		setTimeout(() => window.location.reload(), 700);
+	const qc = useQueryClient();
+	const key = queryKeys.team(props.slug);
+	const { data: team } = useQuery({
+		queryKey: key,
+		queryFn: () => api<Team>(`/api/projects/${props.slug}/team`),
+		initialData: props.initialTeam,
+	});
+
+	// One mutation for every team change: run the Better Auth call, then refetch the team.
+	const change = useMutation({
+		mutationFn: ({ action }: { action: () => Promise<unknown>; okText: string }) => action(),
+		onMutate: () => setMsg(null),
+		onSuccess: (_d, { okText }) => {
+			setMsg({ ok: true, text: okText });
+			return qc.invalidateQueries({ queryKey: key });
+		},
+		onError: (e) => setMsg({ ok: false, text: e.message }),
+	});
+	const busy = change.isPending;
+	function run(action: () => Promise<{ data: unknown; error: { message?: string } | null }>, okText: string) {
+		change.mutate({ action: () => unwrap(action()), okText });
 	}
+	const members = team.members;
+	const invites = team.invites;
 
 	return (
 		<>
@@ -75,10 +89,10 @@ export function TeamClient(props: {
 			<section style={{ marginTop: 40 }}>
 				<div className="row" style={{ justifyContent: "space-between" }}>
 					<h2>Members</h2>
-					<span className="muted">{props.members.length} {props.members.length === 1 ? "member" : "members"}</span>
+					<span className="muted">{members.length} {members.length === 1 ? "member" : "members"}</span>
 				</div>
 				<div className="card list" style={{ marginTop: 16 }}>
-					{props.members.map((m) => {
+					{members.map((m) => {
 						const isMe = m.userId === props.myUserId;
 						const editable = canManage && !isMe && (m.role !== "owner" || props.myRole === "owner");
 						return (
@@ -117,11 +131,11 @@ export function TeamClient(props: {
 				</div>
 			</section>
 
-			{props.invites.length > 0 ? (
+			{invites.length > 0 ? (
 				<section style={{ marginTop: 40 }}>
 					<h2>Pending invitations</h2>
 					<div className="card list" style={{ marginTop: 16 }}>
-						{props.invites.map((i) => (
+						{invites.map((i) => (
 							<div key={i.id} className="row" style={{ padding: "16px 20px", justifyContent: "space-between", flexWrap: "wrap" }}>
 								<div>
 									<div style={{ fontWeight: 500 }}>{i.email}</div>
