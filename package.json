@@ -8,7 +8,7 @@
     "vercel-build": "npm run studio-ui && tsx scripts/migrate.mts && next build",
     "db:migrate": "tsx scripts/migrate.mts",
     "start": "next start",
-    "studio-ui": "npm --prefix studio-ui ci --legacy-peer-deps --no-audit --no-fund && npm --prefix studio-ui run build:hub && node scripts/use-studio-ui.mjs"
+    "studio-ui": "npm --prefix studio-ui ci --include=dev --legacy-peer-deps --no-audit --no-fund && npm --prefix studio-ui run build:hub && node scripts/use-studio-ui.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.106.1",
